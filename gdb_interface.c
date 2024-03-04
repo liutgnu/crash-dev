@@ -711,7 +711,7 @@ static char *prohibited_list[] = {
 	"watch", "rwatch", "awatch", "attach", "continue", "c", "fg", "detach", 
 	"finish", "handle", "interrupt", "jump", "kill", "next", "nexti", 
 	"signal", "step", "s", "stepi", "target", "until", "delete", 
-	"clear", "disable", "enable", "condition", "ignore", "frame", "catch",
+	"clear", "disable", "enable", "condition", "ignore", "catch",
 	"tcatch", "return", "file", "exec-file", "core-file", "symbol-file",
 	"load", "si", "ni", "shell", "sy",
 	NULL  /* must be last */
