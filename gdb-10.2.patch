@@ -10,6 +10,7 @@
 
 tar xvzmf gdb-10.2.tar.gz \
 	gdb-10.2/gdb/symtab.c \
+	gdb-10.2/gdb/thread.c \
 	gdb-10.2/gdb/printcmd.c \
 	gdb-10.2/gdb/symfile.c \
 	gdb-10.2/gdb/Makefile.in \
@@ -16057,3 +16058,32 @@ exit 0
  m10200-dis.c
  m10200-opc.c
  m10300-dis.c
+--- gdb-10.2/gdb/thread.c.orig
++++ gdb-10.2/gdb/thread.c
+@@ -58,6 +58,11 @@ static int highest_thread_num;
+ /* The current/selected thread.  */
+ static thread_info *current_thread_;
+ 
++#ifdef CRASH_MERGE
++/* Function to set cpu, defined by crash-utility */
++extern "C" void set_cpu (int);
++#endif
++
+ /* RAII type used to increase / decrease the refcount of each thread
+    in a given list of threads.  */
+ 
+@@ -1896,7 +1901,13 @@ thread_command (const char *tidstr, int from_tty)
+     {
+       ptid_t previous_ptid = inferior_ptid;
+ 
+-      thread_select (tidstr, parse_thread_id (tidstr, NULL));
++      struct thread_info* thread_id = parse_thread_id (tidstr, NULL);
++
++#ifdef CRASH_MERGE
++      set_cpu(thread_id->ptid.tid());
++#endif
++
++      thread_select (tidstr, thread_id);
+ 
+       /* Print if the thread has not changed, otherwise an event will
+ 	 be sent.  */

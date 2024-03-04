@@ -29,6 +29,8 @@ extern "C" int gdb_readmem_callback(unsigned long, void *, int, int);
 extern "C" int crash_get_nr_cpus(void);
 extern "C" int crash_get_cpu_reg (int cpu, int regno, const char *regname,
                                   int regsize, void *val);
+extern "C" int gdb_change_cpu_context (unsigned int cpu);
+extern "C" int set_cpu (int cpu);
 
 
 /* The crash target.  */
@@ -133,3 +135,25 @@ crash_target_init (void)
   /* Now, set up the frame cache. */
   reinit_frame_cache ();
 }
+
+/*
+ * Change gdb's thread context to the thread on given CPU
+ **/
+extern "C" int
+gdb_change_cpu_context(unsigned int cpu)
+{
+  ptid_t ptid = ptid_t(CRASH_INFERIOR_PID, 0, cpu);
+  inferior *inf = current_inferior ();
+  thread_info *tp = find_thread_ptid (inf, ptid);
+
+  if (tp == nullptr)
+    return FALSE;
+
+  /* Making sure that crash's context is same */
+  set_cpu(cpu);
+
+  /* Switch to the thread */
+  switch_to_thread(tp);
+  return TRUE;
+}
+

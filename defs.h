@@ -8173,4 +8173,7 @@ enum ppc64_regnum {
 	PPC64_VRSAVE_REGNU = 139
 };
 
+/* crash_target.c */
+extern int gdb_change_cpu_context (unsigned int cpu);
+
 #endif /* !GDB_COMMON */
