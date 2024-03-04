@@ -672,7 +672,7 @@ task_init(void)
 	if (ACTIVE()) {
 		active_pid = REMOTE() ? pc->server_pid :
 			LOCAL_ACTIVE() ? pc->program_pid : 1;
-		set_context(NO_TASK, active_pid);
+		set_context(NO_TASK, active_pid, FALSE);
 		tt->this_task = pid_to_task(active_pid);
 	}
 	else {
@@ -684,7 +684,7 @@ task_init(void)
 		else if (ELF_NOTES_VALID() && DISKDUMP_DUMPFILE())
 			map_cpus_to_prstatus_kdump_cmprs();
 		please_wait("determining panic task");
-		set_context(get_panic_context(), NO_PID);
+		set_context(get_panic_context(), NO_PID, TRUE);
 		please_wait_done();
 	}
 
@@ -705,6 +705,17 @@ task_init(void)
 		kt->boot_date.tv_sec = kt->date.tv_sec - uptime_sec;
 		kt->boot_date.tv_nsec = 0;
 	}
+
+	/*
+	 * Refresh CPU 0's thread's regcache
+	 *
+	 * This is required since, it's registers were initialised in
+	 * crash_target_init when crash was not initialised yet and hence could
+	 * not pass registers to gdb when gdb requests via
+	 * crash_target::fetch_registers, so CPU 0's registers are shown as
+	 * <unavailable> in gdb mode
+	 * */
+	gdb_refresh_regcache(0);
 
 	tt->flags |= TASK_INIT_DONE;
 }
@@ -2985,9 +2996,9 @@ refresh_context(ulong curtask, ulong curpid)
 	struct task_context *tc;
 
 	if (task_exists(curtask) && pid_exists(curpid)) {
-                set_context(curtask, NO_PID);
+                set_context(curtask, NO_PID, FALSE);
         } else {
-                set_context(tt->this_task, NO_PID);
+                set_context(tt->this_task, NO_PID, FALSE);
 
                 complain = TRUE;
                 if (STREQ(args[0], "set") && (argcnt == 2) &&
@@ -3053,7 +3064,7 @@ sort_context_array(void)
 	curtask = CURRENT_TASK();
 	qsort((void *)tt->context_array, (size_t)tt->running_tasks,
         	sizeof(struct task_context), sort_by_pid);
-	set_context(curtask, NO_PID);
+	set_context(curtask, NO_PID, FALSE);
 
 	sort_context_by_task();
 }
@@ -3100,7 +3111,7 @@ sort_context_array_by_last_run(void)
 	curtask = CURRENT_TASK();
 	qsort((void *)tt->context_array, (size_t)tt->running_tasks,
         	sizeof(struct task_context), sort_by_last_run);
-	set_context(curtask, NO_PID);
+	set_context(curtask, NO_PID, FALSE);
 
 	sort_context_by_task();
 }
@@ -5281,7 +5292,7 @@ comm_exists(char *s)
  *  that pid is selected.
  */
 int
-set_context(ulong task, ulong pid)
+set_context(ulong task, ulong pid, uint update_gdb_thread)
 {
 	int i;
 	struct task_context *tc;
@@ -5303,7 +5314,10 @@ set_context(ulong task, ulong pid)
 		CURRENT_CONTEXT() = tc;
 
 		/* change the selected thread in gdb, according to current context */
-		return gdb_change_cpu_context(tc->processor);
+		if (update_gdb_thread)
+			return gdb_change_cpu_context(tc->processor);
+		else
+			return TRUE;
 	} else {
 		if (task) 
 			error(INFO, "cannot set context for task: %lx\n", task);

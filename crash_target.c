@@ -30,7 +30,8 @@ extern "C" int crash_get_nr_cpus(void);
 extern "C" int crash_get_cpu_reg (int cpu, int regno, const char *regname,
                                   int regsize, void *val);
 extern "C" int gdb_change_cpu_context (unsigned int cpu);
-extern "C" int set_cpu (int cpu);
+extern "C" void gdb_refresh_regcache(unsigned int cpu);
+extern "C" int set_cpu(int cpu, int print_context);
 
 
 /* The crash target.  */
@@ -150,10 +151,42 @@ gdb_change_cpu_context(unsigned int cpu)
     return FALSE;
 
   /* Making sure that crash's context is same */
-  set_cpu(cpu);
+  set_cpu(cpu, FALSE);
 
   /* Switch to the thread */
   switch_to_thread(tp);
+
+  /* Fetch/Refresh thread's registers */
+  gdb_refresh_regcache(cpu);
+
   return TRUE;
 }
 
+/* Refresh regcache of gdb thread on given CPU
+ *
+ * When gdb threads were initially added by 'crash_target_init', crash was not
+ * yet initialised, and hence crash_target::fetch_registers didn't give any
+ * registers to gdb.
+ *
+ * This is meant to be called after tasks in crash have been initialised, and
+ * possible machdep->get_cpu_reg is also set so architecture can give registers
+ */
+extern "C" void
+gdb_refresh_regcache(unsigned int cpu)
+{
+  int saved_cpu = inferior_thread()->ptid.tid();
+  ptid_t ptid = ptid_t(CRASH_INFERIOR_PID, 0, cpu);
+  inferior *inf = current_inferior();
+  thread_info *tp = find_thread_ptid (inf, ptid);
+
+  if (tp == NULL) {
+    warning("gdb thread for cpu %d not found\n", cpu);
+    return;
+  }
+
+  /* temporarily switch to the cpu so we get correct registers */
+  set_cpu(cpu, FALSE);
+  target_fetch_registers(get_thread_regcache(tp), -1);
+
+  set_cpu(saved_cpu, FALSE);
+}
