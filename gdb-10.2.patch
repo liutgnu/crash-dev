@@ -16057,3 +16057,56 @@ exit 0
  m10200-dis.c
  m10200-opc.c
  m10300-dis.c
+--- gdb-10.2/gdb/ui-file.h.orig
++++ gdb-10.2/gdb/ui-file.h
+@@ -195,6 +195,7 @@ public:
+ 
+   bool can_emit_style_escape () override;
+ 
++  FILE *get_stream(void);
+   /* Sets the internal stream to FILE, and saves the FILE's file
+      descriptor in M_FD.  */
+   void set_stream (FILE *file);
+--- gdb-10.2/gdb/ui-file.c.orig
++++ gdb-10.2/gdb/ui-file.c
+@@ -161,6 +161,12 @@ stdio_file::~stdio_file ()
+     fclose (m_file);
+ }
+ 
++FILE*
++stdio_file::get_stream(void)
++{
++  return m_file;
++}
++
+ void
+ stdio_file::set_stream (FILE *file)
+ {
+--- gdb-10.2/gdb/symtab.c.orig
++++ gdb-10.2/gdb/symtab.c
+@@ -6964,8 +6964,12 @@ void
+ gdb_command_funnel_1(struct gnu_request *req)
+ {
+         struct symbol *sym;
++        FILE *original_stdout_stream = nullptr;
++        FILE *original_stderr_stream = nullptr;
+ 
+         if (req->command != GNU_VERSION && req->command != GNU_USER_PRINT_OPTION) {
++                original_stdout_stream = (dynamic_cast< stdio_file * >gdb_stdout)->get_stream();
++                original_stderr_stream = (dynamic_cast< stdio_file * >gdb_stderr)->get_stream();
+                 (dynamic_cast<stdio_file *>gdb_stdout)->set_stream(req->fp);
+                 (dynamic_cast<stdio_file *>gdb_stderr)->set_stream(req->fp);
+         }
+@@ -7068,6 +7072,12 @@ gdb_command_funnel_1(struct gnu_request *req)
+                 req->flags |= GNU_COMMAND_FAILED;
+                 break;
+         }
++
++        /* Restore the streams gdb output was using */
++        if (original_stdout_stream)
++            (dynamic_cast<stdio_file *>gdb_stdout)->set_stream(original_stdout_stream);
++        if (original_stderr_stream)
++            (dynamic_cast<stdio_file *>gdb_stderr)->set_stream(original_stderr_stream);
+ }
+ 
+ /*
