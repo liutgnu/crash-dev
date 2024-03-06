@@ -6497,6 +6497,17 @@ x86_64_ORC_init(void)
 	};
 	struct ORC_data *orc;
 
+	MEMBER_OFFSET_INIT(inactive_task_frame_bp, "inactive_task_frame", "bp");
+	MEMBER_OFFSET_INIT(inactive_task_frame_ret_addr, "inactive_task_frame", "ret_addr");
+	MEMBER_OFFSET_INIT(inactive_task_frame_r15, "inactive_task_frame", "r15");
+	MEMBER_OFFSET_INIT(inactive_task_frame_r14, "inactive_task_frame", "r14");
+	MEMBER_OFFSET_INIT(inactive_task_frame_r13, "inactive_task_frame", "r13");
+	MEMBER_OFFSET_INIT(inactive_task_frame_r12, "inactive_task_frame", "r12");
+	MEMBER_OFFSET_INIT(inactive_task_frame_flags, "inactive_task_frame", "flags");
+	MEMBER_OFFSET_INIT(inactive_task_frame_si, "inactive_task_frame", "si");
+	MEMBER_OFFSET_INIT(inactive_task_frame_di, "inactive_task_frame", "di");
+	MEMBER_OFFSET_INIT(inactive_task_frame_bx, "inactive_task_frame", "bx");
+
 	if (machdep->flags & FRAMEPOINTER)
 		return;
 
@@ -6553,17 +6564,6 @@ x86_64_ORC_init(void)
 	orc->__start_orc_unwind = symbol_value("__start_orc_unwind");
 	orc->__stop_orc_unwind = symbol_value("__stop_orc_unwind");
 	orc->orc_lookup = symbol_value("orc_lookup");
-
-	MEMBER_OFFSET_INIT(inactive_task_frame_bp, "inactive_task_frame", "bp");
-	MEMBER_OFFSET_INIT(inactive_task_frame_ret_addr, "inactive_task_frame", "ret_addr");
-	MEMBER_OFFSET_INIT(inactive_task_frame_r15, "inactive_task_frame", "r15");
-	MEMBER_OFFSET_INIT(inactive_task_frame_r14, "inactive_task_frame", "r14");
-	MEMBER_OFFSET_INIT(inactive_task_frame_r13, "inactive_task_frame", "r13");
-	MEMBER_OFFSET_INIT(inactive_task_frame_r12, "inactive_task_frame", "r12");
-	MEMBER_OFFSET_INIT(inactive_task_frame_flags, "inactive_task_frame", "flags");
-	MEMBER_OFFSET_INIT(inactive_task_frame_si, "inactive_task_frame", "si");
-	MEMBER_OFFSET_INIT(inactive_task_frame_di, "inactive_task_frame", "di");
-	MEMBER_OFFSET_INIT(inactive_task_frame_bx, "inactive_task_frame", "bx");
 
 	orc->has_signal = MEMBER_EXISTS("orc_entry", "signal");	/* added at 6.3 */
 	orc->has_end = MEMBER_EXISTS("orc_entry", "end");	/* removed at 6.4 */
