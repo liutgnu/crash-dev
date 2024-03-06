@@ -715,7 +715,8 @@ task_init(void)
 	 * crash_target::fetch_registers, so CPU 0's registers are shown as
 	 * <unavailable> in gdb mode
 	 * */
-	gdb_refresh_regcache(0);
+	for (int i = 0; i < get_cpus_online(); i++)
+		gdb_refresh_regcache(i);
 
 	tt->flags |= TASK_INIT_DONE;
 }
@@ -5315,7 +5316,7 @@ set_context(ulong task, ulong pid, uint update_gdb_thread)
 
 		/* change the selected thread in gdb, according to current context */
 		if (update_gdb_thread)
-			return gdb_change_cpu_context(tc->processor);
+			return gdb_change_thread_context(tc->task);
 		else
 			return TRUE;
 	} else {

@@ -6543,6 +6543,28 @@ set_cpu(int cpu, int print_context)
 		show_context(CURRENT_CONTEXT());
 }
 
+int
+crash_set_thread(ulong task)
+{
+	bool found = FALSE;
+	struct task_context *tc = FIRST_CONTEXT();
+
+	for (int i = 0; i < RUNNING_TASKS(); i++, tc++) {
+		if (tc->task == task) {
+			found = TRUE;
+			break;
+		}
+	}
+
+	if (!found)
+		return -1;
+
+	if (CURRENT_TASK() == tc->task)
+		return tc->processor;
+
+	set_context(tc->task, NO_PID, TRUE);
+	return tc->processor;
+}
 
 /*
  *  Collect the irq_desc[] entry along with its associated handler and

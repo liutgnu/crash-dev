@@ -29,10 +29,10 @@ extern "C" int gdb_readmem_callback(unsigned long, void *, int, int);
 extern "C" int crash_get_nr_cpus(void);
 extern "C" int crash_get_cpu_reg (int cpu, int regno, const char *regname,
                                   int regsize, void *val);
-extern "C" int gdb_change_cpu_context (unsigned int cpu);
 extern "C" void gdb_refresh_regcache(unsigned int cpu);
 extern "C" int set_cpu(int cpu, int print_context);
-
+extern "C" int crash_set_thread(ulong);
+extern "C" int gdb_change_thread_context (ulong);
 
 /* The crash target.  */
 
@@ -110,11 +110,13 @@ crash_target::xfer_partial (enum target_object object, const char *annex,
 
 #define CRASH_INFERIOR_PID 1
 
+crash_target *target = NULL;
+
 void
 crash_target_init (void)
 {
   int nr_cpus = crash_get_nr_cpus();
-  crash_target *target = new crash_target ();
+  target = new crash_target ();
 
   /* Own the target until it is successfully pushed.  */
   target_ops_up target_holder (target);
@@ -137,29 +139,35 @@ crash_target_init (void)
   reinit_frame_cache ();
 }
 
-/*
- * Change gdb's thread context to the thread on given CPU
- **/
 extern "C" int
-gdb_change_cpu_context(unsigned int cpu)
+gdb_change_thread_context (ulong task)
 {
-  ptid_t ptid = ptid_t(CRASH_INFERIOR_PID, 0, cpu);
-  inferior *inf = current_inferior ();
-  thread_info *tp = find_thread_ptid (inf, ptid);
-
-  if (tp == nullptr)
+  int tried = 0;
+  inferior* inf = current_inferior();
+  int cpu = crash_set_thread(task);
+  if (cpu < 0)
     return FALSE;
 
-  /* Making sure that crash's context is same */
-  set_cpu(cpu, FALSE);
+  ptid_t ptid = ptid_t(CRASH_INFERIOR_PID, 0, cpu);
 
-  /* Switch to the thread */
-  switch_to_thread(tp);
+retry:
+   thread_info *tp = find_thread_ptid (inf, ptid);
+   if (tp == nullptr && !tried) {
+     thread_info *thread = add_thread_silent(target,
+				ptid_t(CRASH_INFERIOR_PID, 0, cpu));
+     tried++;
+     if (thread) {
+       goto retry;
+     }
+   }
 
-  /* Fetch/Refresh thread's registers */
-  gdb_refresh_regcache(cpu);
+   if (tp == nullptr && tried)
+     return FALSE;
 
-  return TRUE;
+   target_fetch_registers(get_thread_regcache(tp), -1);
+   switch_to_thread(tp);
+   reinit_frame_cache ();
+   return TRUE;
 }
 
 /* Refresh regcache of gdb thread on given CPU

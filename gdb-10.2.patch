@@ -16058,35 +16058,6 @@ exit 0
  m10200-dis.c
  m10200-opc.c
  m10300-dis.c
---- gdb-10.2/gdb/thread.c.orig
-+++ gdb-10.2/gdb/thread.c
-@@ -58,6 +58,11 @@ static int highest_thread_num;
- /* The current/selected thread.  */
- static thread_info *current_thread_;
- 
-+#ifdef CRASH_MERGE
-+/* Function to set cpu, defined by crash-utility */
-+extern "C" void set_cpu (int);
-+#endif
-+
- /* RAII type used to increase / decrease the refcount of each thread
-    in a given list of threads.  */
- 
-@@ -1896,7 +1901,13 @@ thread_command (const char *tidstr, int from_tty)
-     {
-       ptid_t previous_ptid = inferior_ptid;
- 
--      thread_select (tidstr, parse_thread_id (tidstr, NULL));
-+      struct thread_info* thread_id = parse_thread_id (tidstr, NULL);
-+
-+#ifdef CRASH_MERGE
-+      set_cpu(thread_id->ptid.tid());
-+#endif
-+
-+      thread_select (tidstr, thread_id);
- 
-       /* Print if the thread has not changed, otherwise an event will
- 	 be sent.  */
 --- gdb-10.2/gdb/ui-file.h.orig
 +++ gdb-10.2/gdb/ui-file.h
 @@ -195,6 +195,7 @@ public:
@@ -16140,57 +16111,3 @@ exit 0
  }
  
  /*
---- gdb-10.2/gdb/thread.c.orig
-+++ gdb-10.2/gdb/thread.c
-@@ -60,7 +60,7 @@ static thread_info *current_thread_;
- 
- #ifdef CRASH_MERGE
- /* Function to set cpu, defined by crash-utility */
--extern "C" void set_cpu (int);
-+extern "C" void set_cpu(int cpu, int print_context);
- #endif
- 
- /* RAII type used to increase / decrease the refcount of each thread
-@@ -1098,6 +1098,9 @@ print_thread_info_1 (struct ui_out *uiout, const char *requested_threads,
- 	uiout->table_body ();
-       }
- 
-+#ifdef CRASH_MERGE
-+	int current_cpu = current_thread ? current_thread->ptid.tid() : 0;
-+#endif
-     for (inferior *inf : all_inferiors ())
-       for (thread_info *tp : inf->threads ())
- 	{
-@@ -1113,6 +1116,11 @@ print_thread_info_1 (struct ui_out *uiout, const char *requested_threads,
- 
- 	  ui_out_emit_tuple tuple_emitter (uiout, NULL);
- 
-+	  /* Switch to the thread's CPU in crash */
-+#ifdef CRASH_MERGE
-+	  set_cpu(tp->ptid.tid(), FALSE);
-+#endif
-+
- 	  if (!uiout->is_mi_like_p ())
- 	    {
- 	      if (tp == current_thread)
-@@ -1185,6 +1193,11 @@ print_thread_info_1 (struct ui_out *uiout, const char *requested_threads,
-     /* This end scope restores the current thread and the frame
-        selected before the "info threads" command, and it finishes the
-        ui-out list or table.  */
-+
-+#ifdef CRASH_MERGE
-+	  /* Restore crash's context */
-+	  set_cpu(current_cpu, FALSE);
-+#endif
-   }
- 
-   if (pid == -1 && requested_threads == NULL)
-@@ -1904,7 +1917,7 @@ thread_command (const char *tidstr, int from_tty)
-       struct thread_info* thread_id = parse_thread_id (tidstr, NULL);
- 
- #ifdef CRASH_MERGE
--      set_cpu(thread_id->ptid.tid());
-+      set_cpu(thread_id->ptid.tid(), FALSE);
- #endif
- 
-       thread_select (tidstr, thread_id);
