@@ -947,6 +947,12 @@ gdb_lookup_module_symbol(ulong addr, ulong *offset)
 	}
 }
 
+int
+is_kvaddr(ulong addr)
+{
+	return IS_KVADDR(addr);
+}
+
 /*
  *  Used by gdb_interface() to catch gdb-related errors, if desired.
  */
