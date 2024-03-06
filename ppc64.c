@@ -2516,11 +2516,6 @@ ppc64_get_cpu_reg(int cpu, int regno, const char *name, int size,
 	ulong ip, sp;
 	bool ret = FALSE;
 
-	if (LIVE()) {
-		/* doesn't support reading registers in live dump */
-		return FALSE;
-	}
-
 	/* Currently only handling registers available in ppc64_pt_regs:
 	 *
 	 * 0-31:   r0-r31
