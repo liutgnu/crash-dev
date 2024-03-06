@@ -7902,6 +7902,7 @@ extern unsigned char *gdb_prettyprint_arrays;
 extern unsigned int *gdb_repeat_count_threshold;
 extern unsigned char *gdb_stop_print_at_null;
 extern unsigned int *gdb_output_radix;
+int is_kvaddr(ulong);
 
 /*
  *  gdb/top.c
