@@ -1081,6 +1081,21 @@ int crash_get_nr_cpus(void)
                 return kdump_get_nr_cpus();
         else if (VMSS_DUMPFILE())
                 return vmware_vmss_get_nr_cpus();
+	else if (LIVE()) {
+		FILE *cpuinfo;
+		char buf[BUFSIZE];
+		int cpus = 0;
+
+		if ((cpuinfo = fopen("/proc/cpuinfo", "r")) == NULL)
+			return 1;
+		while (fgets(buf, BUFSIZE, cpuinfo)) {
+			if (strstr(buf, "processor\t") == buf) {
+				cpus++;
+			}
+		}
+		fclose(cpuinfo);
+		return cpus;
+	}
 
         /* Just CPU #0 */
         return 1;
