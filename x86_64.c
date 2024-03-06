@@ -143,6 +143,18 @@ struct machine_specific x86_64_machine_specific = { 0 };
 static const char *exception_functions_orig[];
 static const char *exception_functions_5_8[];
 
+/*  Use this hardwired version -- sometimes the
+ *  debuginfo doesn't pick this up even though
+ *  it exists in the kernel; it shouldn't change.
+ */
+struct x86_64_user_regs_struct {
+	unsigned long r15, r14, r13, r12, bp, bx;
+	unsigned long r11, r10, r9, r8, ax, cx, dx;
+	unsigned long si, di, orig_ax, ip, cs;
+	unsigned long flags, sp, ss, fs_base;
+	unsigned long gs_base, ds, es, fs, gs;
+};
+
 /*
  *  Do all necessary machine-specific setup here.  This is called several
  *  times during initialization.
@@ -500,6 +512,12 @@ x86_64_init(int when)
 			MEMBER_OFFSET_INIT(thread_struct_rsp, "thread_struct", "sp");
 		if (INVALID_MEMBER(thread_struct_rsp0))
 			MEMBER_OFFSET_INIT(thread_struct_rsp0, "thread_struct", "sp0");
+		MEMBER_OFFSET_INIT(thread_struct_es, "thread_struct", "es");
+		MEMBER_OFFSET_INIT(thread_struct_ds, "thread_struct", "ds");
+		MEMBER_OFFSET_INIT(thread_struct_fsbase, "thread_struct", "fsbase");
+		MEMBER_OFFSET_INIT(thread_struct_gsbase, "thread_struct", "gsbase");
+		MEMBER_OFFSET_INIT(thread_struct_fs, "thread_struct", "fs");
+		MEMBER_OFFSET_INIT(thread_struct_gs, "thread_struct", "gs");
 		STRUCT_SIZE_INIT(tss_struct, "tss_struct");
 		MEMBER_OFFSET_INIT(tss_struct_ist, "tss_struct", "ist");
 		if (INVALID_MEMBER(tss_struct_ist)) {
@@ -583,17 +601,6 @@ x86_64_init(int when)
 			"user_regs_struct", "r15");
 		STRUCT_SIZE_INIT(user_regs_struct, "user_regs_struct");
 		if (!VALID_STRUCT(user_regs_struct)) {
-			/*  Use this hardwired version -- sometimes the
-			 *  debuginfo doesn't pick this up even though
- 			 *  it exists in the kernel; it shouldn't change.
- 			 */
-			struct x86_64_user_regs_struct {
-				unsigned long r15, r14, r13, r12, bp, bx;
-				unsigned long r11, r10, r9, r8, ax, cx, dx;
-				unsigned long si, di, orig_ax, ip, cs;
-				unsigned long flags, sp, ss, fs_base;
-				unsigned long gs_base, ds, es, fs, gs;
-			};
 			ASSIGN_SIZE(user_regs_struct) = 
 				sizeof(struct x86_64_user_regs_struct);
 			ASSIGN_OFFSET(user_regs_struct_rip) =
@@ -4970,22 +4977,114 @@ x86_64_eframe_verify(struct bt_info *bt, long kvaddr, long cs, long ss,
 	return FALSE;
 }
 
+#define GET_REG_FROM_INACTIVE_TASK_FRAME(reg) \
+({ \
+	ulong offset, reg_value = 0, rsp; \
+	if (VALID_MEMBER(inactive_task_frame_bp)) { \
+		offset = OFFSET(task_struct_thread) + OFFSET(thread_struct_rsp); \
+		readmem(bt->task + offset, KVADDR, &rsp, \
+			sizeof(ulong), "thread_struct.rsp", FAULT_ON_ERROR); \
+		readmem(rsp + OFFSET(inactive_task_frame_##reg), KVADDR, &reg_value, \
+			sizeof(ulong), "inactive_task_frame.##reg", FAULT_ON_ERROR); \
+	} \
+	reg_value; \
+})
+
 /*
  *  Get a stack frame combination of pc and ra from the most relevent spot.
  */
 static void
 x86_64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 {
-	if (bt->flags & BT_DUMPFILE_SEARCH)
-		return x86_64_get_dumpfile_stack_frame(bt, pcp, spp);
+	struct x86_64_user_regs_struct *user_regs;
 
 	if (bt->flags & BT_SKIP_IDLE)
 		bt->flags &= ~BT_SKIP_IDLE;
+	if (pcp)
+		*pcp = x86_64_get_pc(bt);
+	if (spp)
+		*spp = x86_64_get_sp(bt);
+	user_regs = (struct x86_64_user_regs_struct *)GETBUF(sizeof(*user_regs));
+	memset(user_regs, 0, sizeof(struct x86_64_user_regs_struct));
 
-        if (pcp)
-                *pcp = x86_64_get_pc(bt);
-        if (spp)
-                *spp = x86_64_get_sp(bt);
+	if (VALID_MEMBER(inactive_task_frame_bp)) {
+		if (!is_task_active(bt->task)) {
+			/*
+			* For inactive tasks in live and dumpfile, regs can be
+			* get from inactive_task_frame struct.
+			*/
+			user_regs->r15 = GET_REG_FROM_INACTIVE_TASK_FRAME(r15);
+			user_regs->r14 = GET_REG_FROM_INACTIVE_TASK_FRAME(r14);
+			user_regs->r13 = GET_REG_FROM_INACTIVE_TASK_FRAME(r13);
+			user_regs->r12 = GET_REG_FROM_INACTIVE_TASK_FRAME(r12);
+			user_regs->bx  = GET_REG_FROM_INACTIVE_TASK_FRAME(bx);
+			user_regs->bp  = GET_REG_FROM_INACTIVE_TASK_FRAME(bp);
+			/*
+			For inactive tasks:
+			crash> task -x 1|grep sp
+			sp = 0xffffc90000013d00
+			crash> rd ffffc90000013d00 32
+			ffffc90000013d00:  ffff888104dad4a8 0000000000000000  r15,r14
+			ffffc90000013d10:  ffff888100280000 ffff888100216500  r13,r12
+			ffffc90000013d20:  ffff888100217018 ffff88817fd2c800  rbx,rbp
+			ffffc90000013d30:  ffffffff81a6a1b3 ffffc90000013de0  saved_rip,...
+			ffffc90000013d40:  ffff888100000004 99ccbf53ea493000
+			ffffc90000013d50:  ffff888100216500 ffff888100216500
+
+			crash> dis __schedule
+			...
+			0xffffffff81a6a1ab <__schedule+507>:    mov    %r13,%rsi
+			0xffffffff81a6a1ae <__schedule+510>:    call   0xffffffff81003490 <__switch_to_asm>
+			0xffffffff81a6a1b3 <__schedule+515>:    mov    %rax,%rdi <<=== saved_rip
+			...
+			crash> dis __switch_to_asm
+			0xffffffff81003490 <__switch_to_asm>:   push   %rbp
+			0xffffffff81003491 <__switch_to_asm+1>: push   %rbx
+			0xffffffff81003492 <__switch_to_asm+2>: push   %r12
+			0xffffffff81003494 <__switch_to_asm+4>: push   %r13
+			0xffffffff81003496 <__switch_to_asm+6>: push   %r14
+			0xffffffff81003498 <__switch_to_asm+8>: push   %r15
+			0xffffffff8100349a <__switch_to_asm+10>:        mov    %rsp,0x14d8(%rdi)
+			...
+			Now saved_rip = ffffffff81a6a1b3, and we are starting
+			the stack unwind at saved_rip, which is function __schedule()
+			instead of function __switch_to_asm(), so the stack pointer should
+			be rewind from ffffc90000013d00 back to ffffc90000013d38,
+			aka *spp += 7 * reg_len. Otherwise we are unwinding function
+			__schedule() but with __switch_to_asm()'s stack frame, which
+			will fail.
+			*/
+			*spp += 7 * sizeof(unsigned long);
+		} else {
+			/*
+			* For active tasks in dumpfile, we get regs through the
+			* original way. For active tasks in live, we only get
+			* ip and sp in the end of the function.
+			*/
+			if (bt->flags & BT_DUMPFILE_SEARCH) {
+				FREEBUF(user_regs);
+				bt->need_free = FALSE;
+				return x86_64_get_dumpfile_stack_frame(bt, pcp, spp);
+			}
+		}
+	} else {
+		if (!is_task_active(bt->task)) {
+			readmem(*spp, KVADDR, &(user_regs->bp),
+				sizeof(ulong), "user_regs->bp", FAULT_ON_ERROR);
+		} else {
+			if (bt->flags & BT_DUMPFILE_SEARCH) {
+				FREEBUF(user_regs);
+				bt->need_free = FALSE;
+				return x86_64_get_dumpfile_stack_frame(bt, pcp, spp);
+			}
+		}
+	}
+
+	user_regs->ip = *pcp;
+	user_regs->sp = *spp;
+
+	bt->machdep = user_regs;
+	bt->need_free = TRUE;
 }
 
 /*
@@ -6457,6 +6556,14 @@ x86_64_ORC_init(void)
 
 	MEMBER_OFFSET_INIT(inactive_task_frame_bp, "inactive_task_frame", "bp");
 	MEMBER_OFFSET_INIT(inactive_task_frame_ret_addr, "inactive_task_frame", "ret_addr");
+	MEMBER_OFFSET_INIT(inactive_task_frame_r15, "inactive_task_frame", "r15");
+	MEMBER_OFFSET_INIT(inactive_task_frame_r14, "inactive_task_frame", "r14");
+	MEMBER_OFFSET_INIT(inactive_task_frame_r13, "inactive_task_frame", "r13");
+	MEMBER_OFFSET_INIT(inactive_task_frame_r12, "inactive_task_frame", "r12");
+	MEMBER_OFFSET_INIT(inactive_task_frame_flags, "inactive_task_frame", "flags");
+	MEMBER_OFFSET_INIT(inactive_task_frame_si, "inactive_task_frame", "si");
+	MEMBER_OFFSET_INIT(inactive_task_frame_di, "inactive_task_frame", "di");
+	MEMBER_OFFSET_INIT(inactive_task_frame_bx, "inactive_task_frame", "bx");
 
 	orc->has_signal = MEMBER_EXISTS("orc_entry", "signal");	/* added at 6.3 */
 	orc->has_end = MEMBER_EXISTS("orc_entry", "end");	/* removed at 6.4 */
@@ -9069,17 +9176,85 @@ x86_64_get_kvaddr_ranges(struct vaddr_range *vrp)
 	return cnt;
 }
 
+#define REG_CASE(R, r) \
+	case R##_REGNUM: \
+		if (size != sizeof(pt_regs->r)) { \
+			ret = FALSE; break; \
+		} else { \
+			memcpy(value, &pt_regs->r, size); \
+			ret = TRUE; break; \
+		}
+
 static int
 x86_64_get_cpu_reg(int cpu, int regno, const char *name,
                    int size, void *value)
 {
-        if (regno >= LAST_REGNUM)
-                return FALSE;
+	struct bt_info bt_info, bt_setup;
+	struct task_context *tc;
+	struct x86_64_user_regs_struct *pt_regs;
+	ulong ip, sp;
+	bool ret = FALSE;
 
-        if (VMSS_DUMPFILE())
-                return vmware_vmss_get_cpu_reg(cpu, regno, name, size, value);
+	if (VMSS_DUMPFILE())
+		return vmware_vmss_get_cpu_reg(cpu, regno, name, size, value);
+	switch (regno) {
+	case RAX_REGNUM ... GS_REGNUM:
+	case FS_BASE_REGNUM ... ORIG_RAX_REGNUM:
+		break;
+	default:
+		return FALSE;
+	}
 
-        return FALSE;
+	tc = CURRENT_CONTEXT();
+	if (!tc)
+		return FALSE;
+	BZERO(&bt_setup, sizeof(struct bt_info));
+	clone_bt_info(&bt_setup, &bt_info, tc);
+	fill_stackbuf(&bt_info);
+
+	// reusing the get_dumpfile_regs function to get pt regs structure
+	get_dumpfile_regs(&bt_info, &sp, &ip);
+	if (bt_info.stackbuf)
+		FREEBUF(bt_info.stackbuf);
+	pt_regs = (struct x86_64_user_regs_struct *)bt_info.machdep;
+	if (!pt_regs)
+		return FALSE;
+
+	switch (regno) {
+		REG_CASE(RAX,   ax);
+		REG_CASE(RBX,   bx);
+		REG_CASE(RCX,   cx);
+		REG_CASE(RDX,   dx);
+		REG_CASE(RSI,   si);
+		REG_CASE(RDI,   di);
+		REG_CASE(RBP,   bp);
+		REG_CASE(RSP,   sp);
+		REG_CASE(R8,    r8);
+		REG_CASE(R9,    r9);
+		REG_CASE(R10,   r10);
+		REG_CASE(R11,   r11);
+		REG_CASE(R12,   r12);
+		REG_CASE(R13,   r13);
+		REG_CASE(R14,   r14);
+		REG_CASE(R15,   r15);
+		REG_CASE(RIP,   ip);
+		REG_CASE(EFLAGS, flags);
+		REG_CASE(CS,    cs);
+		REG_CASE(SS,    ss);
+		REG_CASE(DS,    ds);
+		REG_CASE(ES,    es);
+		REG_CASE(FS,    fs);
+		REG_CASE(GS,    gs);
+		REG_CASE(FS_BASE, fs_base);
+		REG_CASE(GS_BASE, gs_base);
+		REG_CASE(ORIG_RAX, orig_ax);
+	}
+
+	if (bt_info.need_free) {
+		FREEBUF(pt_regs);
+		bt_info.need_free = FALSE;
+	}
+	return ret;
 }
 
 /*
