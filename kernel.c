@@ -157,6 +157,7 @@ kernel_init()
         if (!(kt->cpu_flags = (ulong *)calloc(NR_CPUS, sizeof(ulong))))
                 error(FATAL, "cannot malloc cpu_flags array");
 
+	STRUCT_SIZE_INIT(cpumask_t, "cpumask_t");
 	cpu_maps_init();
 
 	kt->stext = symbol_value("_stext");
@@ -913,7 +914,7 @@ cpu_map_size(const char *type)
 	struct gnu_request req;
 
         if (LKCD_KERNTYPES()) {
-                if ((len = STRUCT_SIZE("cpumask_t")) < 0)
+		if ((len = SIZE(cpumask_t)) < 0)
                         error(FATAL, "cannot determine type cpumask_t\n");
 		return len;
 	}
@@ -925,7 +926,7 @@ cpu_map_size(const char *type)
 		return len;
 	}
 
-	len = STRUCT_SIZE("cpumask_t");
+	len = SIZE(cpumask_t);
 	if (len < 0)
 		return sizeof(ulong);
 	else
@@ -952,7 +953,7 @@ cpu_maps_init(void)
 		{ ACTIVE_MAP, "active" },
 	};
 
-	if ((len = STRUCT_SIZE("cpumask_t")) < 0)
+	if ((len = SIZE(cpumask_t)) < 0)
 		len = sizeof(ulong);
 
 	buf = GETBUF(len);

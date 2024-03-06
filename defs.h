@@ -2429,6 +2429,7 @@ struct size_table {         /* stash of commonly-used sizes */
 	long maple_tree;
 	long maple_node;
 	long module_memory;
+	long cpumask_t;
 };
 
 struct array_table {
