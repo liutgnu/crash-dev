@@ -115,7 +115,7 @@ crash_target *target = NULL;
 void
 crash_target_init (void)
 {
-  int nr_cpus = crash_get_nr_cpus();
+  int nr_cpus = 1;
   target = new crash_target ();
 
   /* Own the target until it is successfully pushed.  */
@@ -142,26 +142,15 @@ crash_target_init (void)
 extern "C" int
 gdb_change_thread_context (ulong task)
 {
-  int tried = 0;
   inferior* inf = current_inferior();
   int cpu = crash_set_thread(task);
   if (cpu < 0)
     return FALSE;
 
   ptid_t ptid = ptid_t(CRASH_INFERIOR_PID, 0, cpu);
-
-retry:
    thread_info *tp = find_thread_ptid (inf, ptid);
-   if (tp == nullptr && !tried) {
-     thread_info *thread = add_thread_silent(target,
-				ptid_t(CRASH_INFERIOR_PID, 0, cpu));
-     tried++;
-     if (thread) {
-       goto retry;
-     }
-   }
 
-   if (tp == nullptr && tried)
+   if (tp == nullptr)
      return FALSE;
 
    target_fetch_registers(get_thread_regcache(tp), -1);

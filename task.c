@@ -715,8 +715,7 @@ task_init(void)
 	 * crash_target::fetch_registers, so CPU 0's registers are shown as
 	 * <unavailable> in gdb mode
 	 * */
-	for (int i = 0; i < get_cpus_online(); i++)
-		gdb_refresh_regcache(i);
+		gdb_refresh_regcache(0);
 
 	tt->flags |= TASK_INIT_DONE;
 }
