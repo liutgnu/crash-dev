@@ -706,18 +706,6 @@ task_init(void)
 		kt->boot_date.tv_nsec = 0;
 	}
 
-	/*
-	 * Refresh CPU 0's thread's regcache
-	 *
-	 * This is required since, it's registers were initialised in
-	 * crash_target_init when crash was not initialised yet and hence could
-	 * not pass registers to gdb when gdb requests via
-	 * crash_target::fetch_registers, so CPU 0's registers are shown as
-	 * <unavailable> in gdb mode
-	 * */
-	for (int i = 0; i < get_cpus_online(); i++)
-		gdb_refresh_regcache(i);
-
 	tt->flags |= TASK_INIT_DONE;
 }
 
@@ -3065,7 +3053,7 @@ sort_context_array(void)
 	curtask = CURRENT_TASK();
 	qsort((void *)tt->context_array, (size_t)tt->running_tasks,
         	sizeof(struct task_context), sort_by_pid);
-	set_context(curtask, NO_PID, FALSE);
+	set_context(curtask, NO_PID, TRUE);
 
 	sort_context_by_task();
 }
@@ -3112,7 +3100,7 @@ sort_context_array_by_last_run(void)
 	curtask = CURRENT_TASK();
 	qsort((void *)tt->context_array, (size_t)tt->running_tasks,
         	sizeof(struct task_context), sort_by_last_run);
-	set_context(curtask, NO_PID, FALSE);
+	set_context(curtask, NO_PID, TRUE);
 
 	sort_context_by_task();
 }
@@ -11296,4 +11284,21 @@ check_stack_end_magic:
 
 	if (!total)
 		fprintf(fp, "No stack overflows detected\n");
+}
+
+void crash_get_current_task_info(unsigned long *pid, char **comm)
+{
+	int i;
+	struct task_context *tc;
+
+	tc = FIRST_CONTEXT();
+	for (i = 0; i < RUNNING_TASKS(); i++, tc++)
+		if (tc->task == CURRENT_TASK()) {
+			*pid = tc->pid;
+			*comm = tc->comm;
+			return;
+		}
+	*pid = 0;
+	*comm = NULL;
+	return;
 }

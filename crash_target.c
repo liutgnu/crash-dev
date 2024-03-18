@@ -26,13 +26,13 @@
 void crash_target_init (void);
 
 extern "C" int gdb_readmem_callback(unsigned long, void *, int, int);
-extern "C" int crash_get_nr_cpus(void);
 extern "C" int crash_get_cpu_reg (int cpu, int regno, const char *regname,
                                   int regsize, void *val);
 extern "C" void gdb_refresh_regcache(unsigned int cpu);
 extern "C" int set_cpu(int cpu, int print_context);
 extern "C" int crash_set_thread(ulong);
 extern "C" int gdb_change_thread_context (ulong);
+extern "C" void crash_get_current_task_info(unsigned long *pid, char **comm);
 
 /* The crash target.  */
 
@@ -63,7 +63,12 @@ public:
   bool has_registers () override { return true; }
   bool thread_alive (ptid_t ptid) override { return true; }
   std::string pid_to_str (ptid_t ptid) override
-  { return string_printf ("CPU %ld", ptid.tid ()); }
+  {
+    unsigned long pid;
+    char *comm;
+    crash_get_current_task_info(&pid, &comm);
+    return string_printf ("%7ld %s", pid, comm);
+  }
 
 };
 
@@ -110,13 +115,10 @@ crash_target::xfer_partial (enum target_object object, const char *annex,
 
 #define CRASH_INFERIOR_PID 1
 
-crash_target *target = NULL;
-
 void
 crash_target_init (void)
 {
-  int nr_cpus = crash_get_nr_cpus();
-  target = new crash_target ();
+  crash_target *target = new crash_target ();
 
   /* Own the target until it is successfully pushed.  */
   target_ops_up target_holder (target);
@@ -124,13 +126,11 @@ crash_target_init (void)
   push_target (std::move (target_holder));
 
   inferior_appeared (current_inferior (), CRASH_INFERIOR_PID);
-  for (int i = 0; i < nr_cpus; i++)
-    {
-      thread_info *thread = add_thread_silent (target,
-                                        ptid_t(CRASH_INFERIOR_PID, 0, i));
-      if (!i)
-        switch_to_thread (thread);
-    }
+
+  /*Only create 1 gdb threads to view tasks' stack unwinding*/
+  thread_info *thread = add_thread_silent (target,
+                                ptid_t(CRASH_INFERIOR_PID, 0, 0));
+  switch_to_thread (thread);
 
   /* Fetch all registers from core file.  */
   target_fetch_registers (get_current_regcache (), -1);
@@ -142,59 +142,19 @@ crash_target_init (void)
 extern "C" int
 gdb_change_thread_context (ulong task)
 {
-  int tried = 0;
   inferior* inf = current_inferior();
   int cpu = crash_set_thread(task);
   if (cpu < 0)
     return FALSE;
 
   ptid_t ptid = ptid_t(CRASH_INFERIOR_PID, 0, cpu);
-
-retry:
    thread_info *tp = find_thread_ptid (inf, ptid);
-   if (tp == nullptr && !tried) {
-     thread_info *thread = add_thread_silent(target,
-				ptid_t(CRASH_INFERIOR_PID, 0, cpu));
-     tried++;
-     if (thread) {
-       goto retry;
-     }
-   }
 
-   if (tp == nullptr && tried)
+   if (tp == nullptr)
      return FALSE;
 
    target_fetch_registers(get_thread_regcache(tp), -1);
    switch_to_thread(tp);
    reinit_frame_cache ();
    return TRUE;
-}
-
-/* Refresh regcache of gdb thread on given CPU
- *
- * When gdb threads were initially added by 'crash_target_init', crash was not
- * yet initialised, and hence crash_target::fetch_registers didn't give any
- * registers to gdb.
- *
- * This is meant to be called after tasks in crash have been initialised, and
- * possible machdep->get_cpu_reg is also set so architecture can give registers
- */
-extern "C" void
-gdb_refresh_regcache(unsigned int cpu)
-{
-  int saved_cpu = inferior_thread()->ptid.tid();
-  ptid_t ptid = ptid_t(CRASH_INFERIOR_PID, 0, cpu);
-  inferior *inf = current_inferior();
-  thread_info *tp = find_thread_ptid (inf, ptid);
-
-  if (tp == NULL) {
-    warning("gdb thread for cpu %d not found\n", cpu);
-    return;
-  }
-
-  /* temporarily switch to the cpu so we get correct registers */
-  set_cpu(cpu, FALSE);
-  target_fetch_registers(get_thread_regcache(tp), -1);
-
-  set_cpu(saved_cpu, FALSE);
 }
