@@ -8073,6 +8073,12 @@ enum x86_64_regnum {
         LAST_REGNUM
 };
 
+enum arm64_regnum {
+	X29_REGNUM = 29,
+	SP_REGNUM = 31,
+	PC_REGNUM = 32,
+};
+
 /*
  * Register numbers to make crash_target->fetch_registers()
  * ---> machdep->get_cpu_reg() work properly.
