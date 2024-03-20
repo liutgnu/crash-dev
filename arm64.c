@@ -152,6 +152,70 @@ static void arm64_calc_kernel_start(void)
 	ms->kimage_end = (sp ? sp->value : 0);
 }
 
+static int
+arm64_get_cpu_reg(int cpu, int regno, const char *name,
+                   int size, void *value)
+{
+	struct bt_info bt_info, bt_setup;
+	struct task_context *tc;
+	struct arm64_pt_regs *pt_regs;
+	ulong ip, sp;
+	bool ret = FALSE;
+
+	switch (regno) {
+		case X29_REGNUM:
+		case SP_REGNUM:
+		case PC_REGNUM:
+		break;
+	default:
+		return FALSE;
+	}
+
+	tc = CURRENT_CONTEXT();
+	if (!tc)
+		return FALSE;
+	BZERO(&bt_setup, sizeof(struct bt_info));
+	clone_bt_info(&bt_setup, &bt_info, tc);
+	fill_stackbuf(&bt_info);
+
+	get_dumpfile_regs(&bt_info, &sp, &ip);
+	if (bt_info.stackbuf)
+		FREEBUF(bt_info.stackbuf);
+	pt_regs = (struct arm64_pt_regs *)bt_info.machdep;
+	if (!pt_regs)
+		return FALSE;
+
+	switch (regno) {
+	case X29_REGNUM:
+		if (size != sizeof(pt_regs->regs[29])) {
+			ret = FALSE; break;
+		} else {
+			memcpy(value, &pt_regs->regs[29], size);
+			ret = TRUE; break;
+		}
+	case SP_REGNUM:
+                if (size != sizeof(pt_regs->sp)) {
+                        ret = FALSE; break;
+                } else {
+                        memcpy(value, &pt_regs->sp, size);
+                        ret = TRUE; break;
+                }
+	case PC_REGNUM:
+                if (size != sizeof(pt_regs->pc)) {
+                        ret = FALSE; break;
+                } else {
+                        memcpy(value, &pt_regs->pc, size);
+                        ret = TRUE; break;
+                }
+	}
+
+	if (bt_info.need_free) {
+		FREEBUF(pt_regs);
+		bt_info.need_free = FALSE;
+	}
+	return ret;
+}
+
 /*
  * Do all necessary machine-specific setup here. This is called several times
  * during initialization.
@@ -447,6 +511,7 @@ arm64_init(int when)
 		machdep->dumpfile_init = NULL;
 		machdep->verify_line_number = NULL;
 		machdep->init_kernel_pgd = arm64_init_kernel_pgd;
+		machdep->get_cpu_reg = arm64_get_cpu_reg;
 
 		/* use machdep parameters */
 		arm64_calc_phys_offset();
@@ -3788,6 +3853,7 @@ static void
 arm64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 {
 	int ret;
+	struct arm64_pt_regs *user_regs;
 	struct arm64_stackframe stackframe = { 0 };
 
 	if (DUMPFILE() && is_task_active(bt->task)) {
@@ -3799,16 +3865,21 @@ arm64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 		ret = arm64_get_stackframe(bt, &stackframe);
 	}
 
-	if (!ret)
-		error(WARNING, 
-			"cannot determine starting stack frame for task %lx\n",
-				bt->task);
-
 	bt->frameptr = stackframe.fp;
 	if (pcp)
 		*pcp = stackframe.pc;
 	if (spp)
 		*spp = stackframe.sp;
+
+	if (stackframe.sp) {
+		user_regs = (struct arm64_pt_regs *)GETBUF(sizeof(*user_regs));
+		memset(user_regs, 0, sizeof(*user_regs));
+		user_regs->pc = stackframe.pc;
+		user_regs->sp = stackframe.sp;
+		user_regs->regs[29] = stackframe.fp;
+		bt->machdep = user_regs;
+		bt->need_free = TRUE;
+	}
 }
 
 static void
