@@ -152,6 +152,15 @@ static void arm64_calc_kernel_start(void)
 	ms->kimage_end = (sp ? sp->value : 0);
 }
 
+#define REG_CASE(R, r) \
+        case R##_REGNUM: \
+                if (size != sizeof(pt_regs->r)) { \
+                        ret = FALSE; break; \
+                } else { \
+                        memcpy(value, &pt_regs->r, size); \
+                        ret = TRUE; break; \
+                }
+
 static int
 arm64_get_cpu_reg(int cpu, int regno, const char *name,
                    int size, void *value)
@@ -186,27 +195,9 @@ arm64_get_cpu_reg(int cpu, int regno, const char *name,
 		return FALSE;
 
 	switch (regno) {
-	case X29_REGNUM:
-		if (size != sizeof(pt_regs->regs[29])) {
-			ret = FALSE; break;
-		} else {
-			memcpy(value, &pt_regs->regs[29], size);
-			ret = TRUE; break;
-		}
-	case SP_REGNUM:
-                if (size != sizeof(pt_regs->sp)) {
-                        ret = FALSE; break;
-                } else {
-                        memcpy(value, &pt_regs->sp, size);
-                        ret = TRUE; break;
-                }
-	case PC_REGNUM:
-                if (size != sizeof(pt_regs->pc)) {
-                        ret = FALSE; break;
-                } else {
-                        memcpy(value, &pt_regs->pc, size);
-                        ret = TRUE; break;
-                }
+		REG_CASE(X29, regs[29]);
+		REG_CASE(SP, sp);
+		REG_CASE(PC, pc);
 	}
 
 	if (bt_info.need_free) {
