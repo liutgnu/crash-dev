@@ -153,7 +153,7 @@ static void arm64_calc_kernel_start(void)
 }
 
 static int
-arm64_get_cpu_reg(int cpu, int regno, const char *name,
+arm64_get_current_task_reg(int regno, const char *name,
                    int size, void *value)
 {
 	struct bt_info bt_info, bt_setup;
@@ -511,7 +511,7 @@ arm64_init(int when)
 		machdep->dumpfile_init = NULL;
 		machdep->verify_line_number = NULL;
 		machdep->init_kernel_pgd = arm64_init_kernel_pgd;
-		machdep->get_cpu_reg = arm64_get_cpu_reg;
+		machdep->get_current_task_reg = arm64_get_current_task_reg;
 
 		/* use machdep parameters */
 		arm64_calc_phys_offset();
