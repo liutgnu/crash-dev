@@ -9198,8 +9198,9 @@ x86_64_get_cpu_reg(int cpu, int regno, const char *name,
 	if (VMSS_DUMPFILE())
 		return vmware_vmss_get_cpu_reg(cpu, regno, name, size, value);
 	switch (regno) {
-	case RAX_REGNUM ... GS_REGNUM:
-	case FS_BASE_REGNUM ... ORIG_RAX_REGNUM:
+	case RBX_REGNUM:
+	case RBP_REGNUM ... RSP_REGNUM:
+	case R12_REGNUM ... RIP_REGNUM:
 		break;
 	default:
 		return FALSE;
@@ -9221,33 +9222,14 @@ x86_64_get_cpu_reg(int cpu, int regno, const char *name,
 		return FALSE;
 
 	switch (regno) {
-		REG_CASE(RAX,   ax);
 		REG_CASE(RBX,   bx);
-		REG_CASE(RCX,   cx);
-		REG_CASE(RDX,   dx);
-		REG_CASE(RSI,   si);
-		REG_CASE(RDI,   di);
 		REG_CASE(RBP,   bp);
 		REG_CASE(RSP,   sp);
-		REG_CASE(R8,    r8);
-		REG_CASE(R9,    r9);
-		REG_CASE(R10,   r10);
-		REG_CASE(R11,   r11);
 		REG_CASE(R12,   r12);
 		REG_CASE(R13,   r13);
 		REG_CASE(R14,   r14);
 		REG_CASE(R15,   r15);
 		REG_CASE(RIP,   ip);
-		REG_CASE(EFLAGS, flags);
-		REG_CASE(CS,    cs);
-		REG_CASE(SS,    ss);
-		REG_CASE(DS,    ds);
-		REG_CASE(ES,    es);
-		REG_CASE(FS,    fs);
-		REG_CASE(GS,    gs);
-		REG_CASE(FS_BASE, fs_base);
-		REG_CASE(GS_BASE, gs_base);
-		REG_CASE(ORIG_RAX, orig_ax);
 	}
 
 	if (bt_info.need_free) {
