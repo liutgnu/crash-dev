@@ -2249,12 +2249,6 @@ struct offset_table {                    /* stash of commonly-used offsets */
 	long inactive_task_frame_si;
 	long inactive_task_frame_di;
 	long inactive_task_frame_bx;
-	long thread_struct_es;
-	long thread_struct_ds;
-	long thread_struct_fsbase;
-	long thread_struct_gsbase;
-	long thread_struct_fs;
-	long thread_struct_gs;
 };
 
 struct size_table {         /* stash of commonly-used sizes */
@@ -8027,14 +8021,46 @@ extern int have_full_symbols(void);
  * working properly.
  */
 enum x86_64_regnum {
-        RBX_REGNUM = 1,
-        RBP_REGNUM = 6,
+        RAX_REGNUM,
+        RBX_REGNUM,
+        RCX_REGNUM,
+        RDX_REGNUM,
+        RSI_REGNUM,
+        RDI_REGNUM,
+        RBP_REGNUM,
         RSP_REGNUM,
-        R12_REGNUM = 12,
+        R8_REGNUM,
+        R9_REGNUM,
+        R10_REGNUM,
+        R11_REGNUM,
+        R12_REGNUM,
         R13_REGNUM,
         R14_REGNUM,
         R15_REGNUM,
         RIP_REGNUM,
+        EFLAGS_REGNUM,
+        CS_REGNUM,
+        SS_REGNUM,
+        DS_REGNUM,
+        ES_REGNUM,
+        FS_REGNUM,
+        GS_REGNUM,
+        ST0_REGNUM,
+        ST1_REGNUM,
+        ST2_REGNUM,
+        ST3_REGNUM,
+        ST4_REGNUM,
+        ST5_REGNUM,
+        ST6_REGNUM,
+        ST7_REGNUM,
+        FCTRL_REGNUM,
+        FSTAT_REGNUM,
+        FTAG_REGNUM,
+        FISEG_REGNUM,
+        FIOFF_REGNUM,
+        FOSEG_REGNUM,
+        FOOFF_REGNUM,
+        FOP_REGNUM,
         LAST_REGNUM
 };
 

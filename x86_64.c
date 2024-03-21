@@ -512,12 +512,6 @@ x86_64_init(int when)
 			MEMBER_OFFSET_INIT(thread_struct_rsp, "thread_struct", "sp");
 		if (INVALID_MEMBER(thread_struct_rsp0))
 			MEMBER_OFFSET_INIT(thread_struct_rsp0, "thread_struct", "sp0");
-		MEMBER_OFFSET_INIT(thread_struct_es, "thread_struct", "es");
-		MEMBER_OFFSET_INIT(thread_struct_ds, "thread_struct", "ds");
-		MEMBER_OFFSET_INIT(thread_struct_fsbase, "thread_struct", "fsbase");
-		MEMBER_OFFSET_INIT(thread_struct_gsbase, "thread_struct", "gsbase");
-		MEMBER_OFFSET_INIT(thread_struct_fs, "thread_struct", "fs");
-		MEMBER_OFFSET_INIT(thread_struct_gs, "thread_struct", "gs");
 		STRUCT_SIZE_INIT(tss_struct, "tss_struct");
 		MEMBER_OFFSET_INIT(tss_struct_ist, "tss_struct", "ist");
 		if (INVALID_MEMBER(tss_struct_ist)) {
