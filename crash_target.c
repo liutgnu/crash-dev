@@ -26,9 +26,8 @@
 void crash_target_init (void);
 
 extern "C" int gdb_readmem_callback(unsigned long, void *, int, int);
-extern "C" int crash_get_cpu_reg (int cpu, int regno, const char *regname,
+extern "C" int crash_get_current_task_reg (int regno, const char *regname,
                                   int regsize, void *val);
-extern "C" int crash_set_thread(ulong);
 extern "C" int gdb_change_thread_context (ulong);
 extern "C" void crash_get_current_task_info(unsigned long *pid, char **comm);
 
@@ -70,22 +69,27 @@ public:
 
 };
 
-/* We just get all the registers, so we don't use regno.  */
 void
 crash_target::fetch_registers (struct regcache *regcache, int regno)
 {
+  int r;
   gdb_byte regval[16];
-  int cpu = inferior_ptid.tid();
   struct gdbarch *arch = regcache->arch ();
 
-  for (int r = 0; r < gdbarch_num_regs (arch); r++)
+  if (regno >= 0) {
+    r = regno;
+    goto onetime;
+  }
+
+  for (r = 0; regno == -1 && r < gdbarch_num_regs (arch); r++)
     {
+onetime:
       const char *regname = gdbarch_register_name(arch, r);
       int regsize = register_size (arch, r);
       if (regsize > sizeof (regval))
         error (_("fatal error: buffer size is not enough to fit register value"));
 
-      if (crash_get_cpu_reg (cpu, r, regname, regsize, (void *)&regval))
+      if (crash_get_current_task_reg (r, regname, regsize, (void *)&regval))
         regcache->raw_supply (r, regval);
       else
         regcache->raw_supply (r, NULL);
@@ -140,19 +144,17 @@ crash_target_init (void)
 extern "C" int
 gdb_change_thread_context (ulong task)
 {
-  inferior* inf = current_inferior();
-  int cpu = crash_set_thread(task);
-  if (cpu < 0)
-    return FALSE;
+  static ulong prev_task = 0;
 
-  ptid_t ptid = ptid_t(CRASH_INFERIOR_PID, 0, cpu);
-   thread_info *tp = find_thread_ptid (inf, ptid);
+  /*
+   * Crash calls this method even if CURRENT task is not updated.
+   * Ignore it and keep gdb caches active.
+   */
+  if (task == prev_task)
+    return TRUE;
+  prev_task = task;
 
-   if (tp == nullptr)
-     return FALSE;
-
-   target_fetch_registers(get_thread_regcache(tp), -1);
-   switch_to_thread(tp);
-   reinit_frame_cache ();
-   return TRUE;
+  registers_changed();
+  reinit_frame_cache();
+  return TRUE;
 }

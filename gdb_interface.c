@@ -1073,11 +1073,11 @@ unsigned long crash_get_kaslr_offset(void)
 }
 
 /* Callbacks for crash_target */
-int crash_get_cpu_reg (int cpu, int regno, const char *regname,
+int crash_get_current_task_reg (int regno, const char *regname,
                        int regsize, void *value)
 {
-        if (!machdep->get_cpu_reg)
+        if (!machdep->get_current_task_reg)
                 return FALSE;
-        return machdep->get_cpu_reg(cpu, regno, regname, regsize, value);
+        return machdep->get_current_task_reg(regno, regname, regsize, value);
 }
 

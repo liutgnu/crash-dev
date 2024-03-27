@@ -55,7 +55,7 @@ static void ppc64_set_bt_emergency_stack(enum emergency_stack_type type,
 static char * ppc64_check_eframe(struct ppc64_pt_regs *);
 static void ppc64_print_eframe(char *, struct ppc64_pt_regs *, 
 		struct bt_info *);
-static int ppc64_get_cpu_reg(int cpu, int regno, const char *name, int size,
+static int ppc64_get_current_task_reg(int regno, const char *name, int size,
 		  void *value);
 static void parse_cmdline_args(void);
 static int ppc64_paca_percpu_offset_init(int);
@@ -706,7 +706,7 @@ ppc64_init(int when)
 				error(FATAL, "cannot malloc hwirqstack buffer space.");
 		}
 
-		machdep->get_cpu_reg = ppc64_get_cpu_reg;
+		machdep->get_current_task_reg = ppc64_get_current_task_reg;
 
 		ppc64_init_paca_info();
 
@@ -2506,7 +2506,7 @@ ppc64_print_eframe(char *efrm_str, struct ppc64_pt_regs *regs,
 }
 
 static int
-ppc64_get_cpu_reg(int cpu, int regno, const char *name, int size,
+ppc64_get_current_task_reg(int regno, const char *name, int size,
 		  void *value)
 {
 	struct bt_info bt_info, bt_setup;
@@ -2555,7 +2555,7 @@ ppc64_get_cpu_reg(int cpu, int regno, const char *name, int size,
 	pt_regs = (struct ppc64_pt_regs *)bt_info.machdep;
 
 	if (!pt_regs) {
-		error(WARNING, "pt_regs not available for cpu %d\n", cpu);
+		error(WARNING, "pt_regs not available for cpu %d\n", tc->processor);
 		return FALSE;
 	}
 

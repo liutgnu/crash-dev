@@ -126,7 +126,7 @@ static int x86_64_get_framesize(struct bt_info *, ulong, ulong, char *);
 static void x86_64_framesize_debug(struct bt_info *);
 static void x86_64_get_active_set(void);
 static int x86_64_get_kvaddr_ranges(struct vaddr_range *);
-static int x86_64_get_cpu_reg(int, int, const char *, int, void *);
+static int x86_64_get_current_task_reg(int, const char *, int, void *);
 static int x86_64_verify_paddr(uint64_t);
 static void GART_init(void);
 static void x86_64_exception_stacks_init(void);
@@ -207,7 +207,7 @@ x86_64_init(int when)
 		machdep->machspec->irq_eframe_link = UNINITIALIZED;
 		machdep->machspec->irq_stack_gap = UNINITIALIZED;
 		machdep->get_kvaddr_ranges = x86_64_get_kvaddr_ranges;
-		machdep->get_cpu_reg = x86_64_get_cpu_reg;
+		machdep->get_current_task_reg = x86_64_get_current_task_reg;
                 if (machdep->cmdline_args[0])
                         parse_cmdline_args();
 		if ((string = pc->read_vmcoreinfo("relocate"))) {
@@ -898,7 +898,7 @@ x86_64_dump_machdep_table(ulong arg)
         fprintf(fp, "        is_page_ptr: x86_64_is_page_ptr()\n");
         fprintf(fp, "       verify_paddr: x86_64_verify_paddr()\n");
         fprintf(fp, "  get_kvaddr_ranges: x86_64_get_kvaddr_ranges()\n");
-	fprintf(fp, "        get_cpu_reg: x86_64_get_cpu_reg()\n");
+	fprintf(fp, "get_current_task_reg: x86_64_get_current_task_reg()\n");
         fprintf(fp, "    init_kernel_pgd: x86_64_init_kernel_pgd()\n");
         fprintf(fp, "clear_machdep_cache: x86_64_clear_machdep_cache()\n");
 	fprintf(fp, " xendump_p2m_create: %s\n", PVOPS_XEN() ?
@@ -9186,7 +9186,7 @@ x86_64_get_kvaddr_ranges(struct vaddr_range *vrp)
 		}
 
 static int
-x86_64_get_cpu_reg(int cpu, int regno, const char *name,
+x86_64_get_current_task_reg(int regno, const char *name,
                    int size, void *value)
 {
 	struct bt_info bt_info, bt_setup;
@@ -9195,8 +9195,6 @@ x86_64_get_cpu_reg(int cpu, int regno, const char *name,
 	ulong ip, sp;
 	bool ret = FALSE;
 
-	if (VMSS_DUMPFILE())
-		return vmware_vmss_get_cpu_reg(cpu, regno, name, size, value);
 	switch (regno) {
 	case RAX_REGNUM ... GS_REGNUM:
 	case FS_BASE_REGNUM ... ORIG_RAX_REGNUM:
@@ -9208,6 +9206,60 @@ x86_64_get_cpu_reg(int cpu, int regno, const char *name,
 	tc = CURRENT_CONTEXT();
 	if (!tc)
 		return FALSE;
+
+	/*
+	 * For inactive task, grab rip, rbp, rbx, r12, r13, r14 and r15 from
+	 * inactive_task_frame (see __switch_to_asm). Other regs saved on
+	 * regular frame.
+	 */
+	if (!is_task_active(tc->task)) {
+		int frame_size = STRUCT_SIZE("inactive_task_frame");
+
+		/* Only modern kernels supported. */
+		if (tt->flags & THREAD_INFO && frame_size == 7 * 8) {
+			ulong rsp;
+			int offset = 0;
+			switch (regno) {
+				case RSP_REGNUM:
+					readmem(tc->task + OFFSET(task_struct_thread) +
+						OFFSET(thread_struct_rsp), KVADDR,
+						&rsp, sizeof(void *),
+						"thread_struct rsp", FAULT_ON_ERROR);
+					rsp += frame_size;
+					memcpy(value, &rsp, size);
+					return TRUE;
+				case RIP_REGNUM:
+					offset += 8;
+				case RBP_REGNUM:
+					offset += 8;
+				case RBX_REGNUM:
+					offset += 8;
+				case R12_REGNUM:
+					offset += 8;
+				case R13_REGNUM:
+					offset += 8;
+				case R14_REGNUM:
+					offset += 8;
+				case R15_REGNUM:
+					readmem(tc->task + OFFSET(task_struct_thread) +
+						OFFSET(thread_struct_rsp), KVADDR,
+						&rsp, sizeof(void *),
+						"thread_struct rsp", FAULT_ON_ERROR);
+					readmem(rsp + offset, KVADDR, value, sizeof(void *),
+							"inactive_thread_frame saved regs", FAULT_ON_ERROR);
+					return TRUE;
+			}
+		}
+		/* TBD: older kernels support. */
+		return FALSE;
+	}
+
+	/*
+	 * Task is active, grab CPU's registers
+	 */
+	if (VMSS_DUMPFILE())
+		return vmware_vmss_get_cpu_reg(tc->processor, regno, name, size, value);
+
 	BZERO(&bt_setup, sizeof(struct bt_info));
 	clone_bt_info(&bt_setup, &bt_info, tc);
 	fill_stackbuf(&bt_info);

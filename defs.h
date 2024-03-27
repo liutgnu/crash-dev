@@ -1081,7 +1081,7 @@ struct machdep_table {
         void (*get_irq_affinity)(int);
         void (*show_interrupts)(int, ulong *);
 	int (*is_page_ptr)(ulong, physaddr_t *);
-	int (*get_cpu_reg)(int, int, const char *, int, void *);
+	int (*get_current_task_reg)(int, const char *, int, void *);
 	int (*is_cpu_prstatus_valid)(int cpu);
 };
 
@@ -6124,7 +6124,6 @@ void dump_kernel_table(int);
 void dump_bt_info(struct bt_info *, char *where);
 void dump_log(int);
 void parse_kernel_version(char *);
-int crash_set_thread(ulong);
 
 #define LOG_LEVEL(v) ((v) & 0x07)
 #define SHOW_LOG_LEVEL    (0x1)
@@ -8023,7 +8022,7 @@ extern int have_full_symbols(void);
 
 /*
  * Register numbers must be in sync with gdb/features/i386/64bit-core.c
- * to make crash_target->fetch_registers() ---> machdep->get_cpu_reg()
+ * to make crash_target->fetch_registers() ---> machdep->get_current_task_reg()
  * working properly.
  */
 enum x86_64_regnum {
@@ -8081,7 +8080,7 @@ enum arm64_regnum {
 
 /*
  * Register numbers to make crash_target->fetch_registers()
- * ---> machdep->get_cpu_reg() work properly.
+ * ---> machdep->get_current_task_reg() work properly.
  *
  *  These register numbers and names are given according to output of
  *  `rs6000_register_name`, because that is what was being used by
