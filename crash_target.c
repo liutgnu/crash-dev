@@ -26,7 +26,6 @@
 void crash_target_init (void);
 
 extern "C" int gdb_readmem_callback(unsigned long, void *, int, int);
-extern "C" int crash_get_nr_cpus(void);
 extern "C" int crash_get_cpu_reg (int cpu, int regno, const char *regname,
                                   int regsize, void *val);
 
@@ -110,7 +109,6 @@ crash_target::xfer_partial (enum target_object object, const char *annex,
 void
 crash_target_init (void)
 {
-  int nr_cpus = crash_get_nr_cpus();
   crash_target *target = new crash_target ();
 
   /* Own the target until it is successfully pushed.  */
@@ -119,13 +117,11 @@ crash_target_init (void)
   push_target (std::move (target_holder));
 
   inferior_appeared (current_inferior (), CRASH_INFERIOR_PID);
-  for (int i = 0; i < nr_cpus; i++)
-    {
-      thread_info *thread = add_thread_silent (target,
-                                        ptid_t(CRASH_INFERIOR_PID, 0, i));
-      if (!i)
-        switch_to_thread (thread);
-    }
+
+  /*Only create 1 gdb threads to view tasks' stack unwinding*/
+  thread_info *thread = add_thread_silent (target,
+                                ptid_t(CRASH_INFERIOR_PID, 0, 0));
+  switch_to_thread (thread);
 
   /* Fetch all registers from core file.  */
   target_fetch_registers (get_current_regcache (), -1);
