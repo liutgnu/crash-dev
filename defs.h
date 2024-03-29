@@ -6012,7 +6012,7 @@ extern char *help_map[];
  *  task.c
  */ 
 void task_init(void);
-int set_context(ulong, ulong);
+int set_context(ulong, ulong, uint);
 void show_context(struct task_context *);
 ulong pid_to_task(ulong);
 ulong task_to_pid(ulong);
@@ -6068,6 +6068,7 @@ void sort_tgid_array(void);
 int sort_by_tgid(const void *, const void *);
 int in_irq_ctx(ulonglong, int, ulong);
 void check_stack_overflow(void);
+int gdb_change_thread_context (ulong);
 
 /*
  *  extensions.c
@@ -6107,6 +6108,7 @@ void dump_kernel_table(int);
 void dump_bt_info(struct bt_info *, char *where);
 void dump_log(int);
 void parse_kernel_version(char *);
+int crash_set_thread(ulong);
 
 #define LOG_LEVEL(v) ((v) & 0x07)
 #define SHOW_LOG_LEVEL    (0x1)
@@ -8049,5 +8051,8 @@ enum x86_64_regnum {
         FOP_REGNUM,
         LAST_REGNUM
 };
+
+/* crash_target.c */
+extern int gdb_change_cpu_context (unsigned int cpu);
 
 #endif /* !GDB_COMMON */

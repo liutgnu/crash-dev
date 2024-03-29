@@ -6494,14 +6494,42 @@ set_cpu(int cpu)
 	if (hide_offline_cpu(cpu))
 		error(FATAL, "invalid cpu number: cpu %d is OFFLINE\n", cpu);
 
-	if ((task = get_active_task(cpu))) 
-		set_context(task, NO_PID);
+	task = get_active_task(cpu);
+
+	/* Check if context is already set to given cpu */
+	if (task == CURRENT_TASK())
+		return;
+
+	if (task)
+		set_context(task, NO_PID, TRUE);
 	else
 		error(FATAL, "cannot determine active task on cpu %ld\n", cpu);
 
 	show_context(CURRENT_CONTEXT());
 }
 
+int
+crash_set_thread(ulong task)
+{
+	bool found = FALSE;
+	struct task_context *tc = FIRST_CONTEXT();
+
+	for (int i = 0; i < RUNNING_TASKS(); i++, tc++) {
+		if (tc->task == task) {
+			found = TRUE;
+			break;
+		}
+	}
+
+	if (!found)
+		return -1;
+
+	if (CURRENT_TASK() == tc->task)
+		return 0;
+
+	set_context(tc->task, NO_PID, TRUE);
+	return 0;
+}
 
 /*
  *  Collect the irq_desc[] entry along with its associated handler and

@@ -28,7 +28,8 @@ void crash_target_init (void);
 extern "C" int gdb_readmem_callback(unsigned long, void *, int, int);
 extern "C" int crash_get_cpu_reg (int cpu, int regno, const char *regname,
                                   int regsize, void *val);
-
+extern "C" int crash_set_thread(ulong);
+extern "C" int gdb_change_thread_context (ulong);
 
 /* The crash target.  */
 
@@ -128,4 +129,24 @@ crash_target_init (void)
 
   /* Now, set up the frame cache. */
   reinit_frame_cache ();
+}
+
+extern "C" int
+gdb_change_thread_context (ulong task)
+{
+  inferior* inf = current_inferior();
+  int cpu = crash_set_thread(task);
+  if (cpu < 0)
+    return FALSE;
+
+  ptid_t ptid = ptid_t(CRASH_INFERIOR_PID, 0, cpu);
+   thread_info *tp = find_thread_ptid (inf, ptid);
+
+   if (tp == nullptr)
+     return FALSE;
+
+   target_fetch_registers(get_thread_regcache(tp), -1);
+   switch_to_thread(tp);
+   reinit_frame_cache ();
+   return TRUE;
 }
