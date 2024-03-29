@@ -11285,3 +11285,12 @@ check_stack_end_magic:
 	if (!total)
 		fprintf(fp, "No stack overflows detected\n");
 }
+
+void crash_get_current_task_info(unsigned long *pid, char **comm);
+void crash_get_current_task_info(unsigned long *pid, char **comm)
+{
+	struct task_context *tc = CURRENT_CONTEXT();
+
+	*pid = tc->pid;
+	*comm = tc->comm;
+}
