@@ -75,6 +75,26 @@ static ulong pmd_page_vaddr_l4(ulong pmd);
 static int is_opal_context(ulong sp, ulong nip);
 void opalmsg(void);
 
+struct user_regs_bitmap_struct {
+	struct {
+		long gpr[32];
+		long nip;
+		long msr;
+		long orig_gpr3;      /* Used for restarting system calls */
+		long ctr;
+		long link;
+		long xer;
+		long ccr;
+		long mq;             /* 601 only (not used at present) */
+					/* Used on APUS to hold IPL value. */
+		long trap;           /* Reason for being here */
+		long dar;            /* Fault registers */
+		long dsisr;
+		long result;         /* Result of a system call */
+	};
+	ulong bitmap;
+};
+
 static int is_opal_context(ulong sp, ulong nip)
 {
 	uint64_t opal_start, opal_end;
@@ -2512,7 +2532,7 @@ ppc64_get_current_task_reg(int regno, const char *name, int size,
 	struct bt_info bt_info, bt_setup;
 	struct task_context *tc;
 	ulong task;
-	struct ppc64_pt_regs *pt_regs;
+	struct user_regs_bitmap_struct *ur_bitmap;
 	ulong ip, sp;
 	bool ret = FALSE;
 
@@ -2552,51 +2572,67 @@ ppc64_get_current_task_reg(int regno, const char *name, int size,
 	get_dumpfile_regs(&bt_info, &sp, &ip);
 	if (bt_info.stackbuf)
 		FREEBUF(bt_info.stackbuf);
-	pt_regs = (struct ppc64_pt_regs *)bt_info.machdep;
+	ur_bitmap = (struct user_regs_bitmap_struct *)bt_info.machdep;
 
-	if (!pt_regs) {
+	if (!ur_bitmap) {
 		error(WARNING, "pt_regs not available for cpu %d\n", tc->processor);
 		return FALSE;
 	}
+	if (!bt_info.need_free) {
+		goto get_all;
+	}
 
+	switch (ur_bitmap->bitmap) {
+	case 0x100000002:
+		switch (regno) {
+		case PPC64_R1_REGNUM:
+		case PPC64_PC_REGNUM:
+			break;
+		default:
+			return FALSE;
+		}
+		break;
+	}
+
+get_all:
 	switch (regno) {
 	case PPC64_R0_REGNUM ... PPC64_R31_REGNUM:
-		if (size != sizeof(pt_regs->gpr[regno])) {
+		if (size != sizeof(ur_bitmap->gpr[regno])) {
 			ret = FALSE; break;  // size mismatch
 		}
-		memcpy(value, &pt_regs->gpr[regno], size);
+		memcpy(value, &ur_bitmap->gpr[regno], size);
 		ret = TRUE; break;
 
 	case PPC64_PC_REGNUM:
-		if (size != sizeof(pt_regs->nip)) {
+		if (size != sizeof(ur_bitmap->nip)) {
 			ret = FALSE; break;  // size mismatch
 		}
-		memcpy(value, &pt_regs->nip, size);
+		memcpy(value, &ur_bitmap->nip, size);
 		ret = TRUE; break;
 
 	case PPC64_MSR_REGNUM:
-		if (size != sizeof(pt_regs->msr)) {
+		if (size != sizeof(ur_bitmap->msr)) {
 			ret = FALSE; break;  // size mismatch
 		}
-		memcpy(value, &pt_regs->msr, size);
+		memcpy(value, &ur_bitmap->msr, size);
 		ret = TRUE; break;
 
 	case PPC64_LR_REGNUM:
-		if (size != sizeof(pt_regs->link)) {
+		if (size != sizeof(ur_bitmap->link)) {
 			ret = FALSE; break;  // size mismatch
 		}
-		memcpy(value, &pt_regs->link, size);
+		memcpy(value, &ur_bitmap->link, size);
 		ret = TRUE; break;
 
 	case PPC64_CTR_REGNUM:
-		if (size != sizeof(pt_regs->ctr)) {
+		if (size != sizeof(ur_bitmap->ctr)) {
 			ret = FALSE; break;  // size mismatch
 		}
-		memcpy(value, &pt_regs->ctr, size);
+		memcpy(value, &ur_bitmap->ctr, size);
 		ret = TRUE; break;
 	}
 	if (bt_info.need_free) {
-		FREEBUF(pt_regs);
+		FREEBUF(ur_bitmap);
 		bt_info.need_free = FALSE;
 	}
 
@@ -2883,7 +2919,7 @@ static void
 ppc64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 {
 	ulong ksp, nip;
-	struct ppc64_pt_regs *regs;
+	struct user_regs_bitmap_struct *ur_bitmap;
 
 	nip = ksp = 0;
 
@@ -2892,11 +2928,12 @@ ppc64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 		bt->need_free = FALSE;
 	} else {
 		get_ppc64_frame(bt, &nip, &ksp);
-		regs = (struct ppc64_pt_regs *)GETBUF(sizeof(struct ppc64_pt_regs));
-		memset(regs, 0, sizeof(struct ppc64_pt_regs));
-		regs->nip = nip;
-		regs->gpr[1] = ksp;
-		bt->machdep = regs;
+		ur_bitmap = (struct user_regs_bitmap_struct *)GETBUF(sizeof(*ur_bitmap));
+		memset(ur_bitmap, 0, sizeof(*ur_bitmap));
+		ur_bitmap->nip = nip;
+		ur_bitmap->gpr[1] = ksp;
+		ur_bitmap->bitmap += 0x100000002;
+		bt->machdep = ur_bitmap;
 		bt->need_free = TRUE;
 	}
 
