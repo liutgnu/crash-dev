@@ -26,7 +26,7 @@
 void crash_target_init (void);
 
 extern "C" int gdb_readmem_callback(unsigned long, void *, int, int);
-extern "C" int crash_get_cpu_reg (int cpu, int regno, const char *regname,
+extern "C" int crash_get_current_task_reg (int regno, const char *regname,
                                   int regsize, void *val);
 extern "C" int gdb_change_thread_context ();
 
@@ -83,7 +83,7 @@ onetime:
       if (regsize > sizeof (regval))
         error (_("fatal error: buffer size is not enough to fit register value"));
 
-      if (crash_get_cpu_reg (cpu, r, regname, regsize, (void *)&regval))
+      if (crash_get_current_task_reg (r, regname, regsize, (void *)&regval))
         regcache->raw_supply (r, regval);
       else
         regcache->raw_supply (r, NULL);
