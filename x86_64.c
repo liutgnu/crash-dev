@@ -155,6 +155,17 @@ struct x86_64_user_regs_struct {
 	unsigned long gs_base, ds, es, fs, gs;
 };
 
+struct user_regs_bitmap_struct {
+	struct {
+		unsigned long r15, r14, r13, r12, bp, bx;
+		unsigned long r11, r10, r9, r8, ax, cx, dx;
+		unsigned long si, di, orig_ax, ip, cs;
+		unsigned long flags, sp, ss, fs_base;
+		unsigned long gs_base, ds, es, fs, gs;
+	};
+	ulong bitmap;
+};
+
 /*
  *  Do all necessary machine-specific setup here.  This is called several
  *  times during initialization.
@@ -4996,7 +5007,7 @@ x86_64_eframe_verify(struct bt_info *bt, long kvaddr, long cs, long ss,
 static void
 x86_64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 {
-	struct x86_64_user_regs_struct *user_regs;
+	struct user_regs_bitmap_struct *ur_bitmap;
 
 	if (bt->flags & BT_SKIP_IDLE)
 		bt->flags &= ~BT_SKIP_IDLE;
@@ -5004,8 +5015,8 @@ x86_64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 		*pcp = x86_64_get_pc(bt);
 	if (spp)
 		*spp = x86_64_get_sp(bt);
-	user_regs = (struct x86_64_user_regs_struct *)GETBUF(sizeof(*user_regs));
-	memset(user_regs, 0, sizeof(struct x86_64_user_regs_struct));
+	ur_bitmap = (struct user_regs_bitmap_struct *)GETBUF(sizeof(*ur_bitmap));
+	memset(ur_bitmap, 0, sizeof(struct user_regs_bitmap_struct));
 
 	if (VALID_MEMBER(inactive_task_frame_bp)) {
 		if (!is_task_active(bt->task)) {
@@ -5013,12 +5024,12 @@ x86_64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 			* For inactive tasks in live and dumpfile, regs can be
 			* get from inactive_task_frame struct.
 			*/
-			user_regs->r15 = GET_REG_FROM_INACTIVE_TASK_FRAME(r15);
-			user_regs->r14 = GET_REG_FROM_INACTIVE_TASK_FRAME(r14);
-			user_regs->r13 = GET_REG_FROM_INACTIVE_TASK_FRAME(r13);
-			user_regs->r12 = GET_REG_FROM_INACTIVE_TASK_FRAME(r12);
-			user_regs->bx  = GET_REG_FROM_INACTIVE_TASK_FRAME(bx);
-			user_regs->bp  = GET_REG_FROM_INACTIVE_TASK_FRAME(bp);
+			ur_bitmap->r15 = GET_REG_FROM_INACTIVE_TASK_FRAME(r15);
+			ur_bitmap->r14 = GET_REG_FROM_INACTIVE_TASK_FRAME(r14);
+			ur_bitmap->r13 = GET_REG_FROM_INACTIVE_TASK_FRAME(r13);
+			ur_bitmap->r12 = GET_REG_FROM_INACTIVE_TASK_FRAME(r12);
+			ur_bitmap->bx  = GET_REG_FROM_INACTIVE_TASK_FRAME(bx);
+			ur_bitmap->bp  = GET_REG_FROM_INACTIVE_TASK_FRAME(bp);
 			/*
 			For inactive tasks:
 			crash> task -x 1|grep sp
@@ -5055,6 +5066,7 @@ x86_64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 			will fail.
 			*/
 			*spp += 7 * sizeof(unsigned long);
+			ur_bitmap->bitmap += 0x3f;
 		} else {
 			/*
 			* For active tasks in dumpfile, we get regs through the
@@ -5062,28 +5074,30 @@ x86_64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 			* ip and sp in the end of the function.
 			*/
 			if (bt->flags & BT_DUMPFILE_SEARCH) {
-				FREEBUF(user_regs);
+				FREEBUF(ur_bitmap);
 				bt->need_free = FALSE;
 				return x86_64_get_dumpfile_stack_frame(bt, pcp, spp);
 			}
 		}
 	} else {
 		if (!is_task_active(bt->task)) {
-			readmem(*spp, KVADDR, &(user_regs->bp),
-				sizeof(ulong), "user_regs->bp", FAULT_ON_ERROR);
+			readmem(*spp, KVADDR, &(ur_bitmap->bp),
+				sizeof(ulong), "ur_bitmap->bp", FAULT_ON_ERROR);
+			ur_bitmap->bitmap += 0x10;
 		} else {
 			if (bt->flags & BT_DUMPFILE_SEARCH) {
-				FREEBUF(user_regs);
+				FREEBUF(ur_bitmap);
 				bt->need_free = FALSE;
 				return x86_64_get_dumpfile_stack_frame(bt, pcp, spp);
 			}
 		}
 	}
 
-	user_regs->ip = *pcp;
-	user_regs->sp = *spp;
+	ur_bitmap->ip = *pcp;
+	ur_bitmap->sp = *spp;
+	ur_bitmap->bitmap += 0x50000;
 
-	bt->machdep = user_regs;
+	bt->machdep = ur_bitmap;
 	bt->need_free = TRUE;
 }
 
@@ -9178,10 +9192,10 @@ x86_64_get_kvaddr_ranges(struct vaddr_range *vrp)
 
 #define REG_CASE(R, r) \
 	case R##_REGNUM: \
-		if (size != sizeof(pt_regs->r)) { \
+		if (size != sizeof(ur_bitmap->r)) { \
 			ret = FALSE; break; \
 		} else { \
-			memcpy(value, &pt_regs->r, size); \
+			memcpy(value, &ur_bitmap->r, size); \
 			ret = TRUE; break; \
 		}
 
@@ -9191,7 +9205,7 @@ x86_64_get_current_task_reg(int regno, const char *name,
 {
 	struct bt_info bt_info, bt_setup;
 	struct task_context *tc;
-	struct x86_64_user_regs_struct *pt_regs;
+	struct user_regs_bitmap_struct *ur_bitmap;
 	ulong ip, sp;
 	bool ret = FALSE;
 
@@ -9218,10 +9232,51 @@ x86_64_get_current_task_reg(int regno, const char *name,
 	get_dumpfile_regs(&bt_info, &sp, &ip);
 	if (bt_info.stackbuf)
 		FREEBUF(bt_info.stackbuf);
-	pt_regs = (struct x86_64_user_regs_struct *)bt_info.machdep;
-	if (!pt_regs)
+	ur_bitmap = (struct user_regs_bitmap_struct *)bt_info.machdep;
+	if (!ur_bitmap)
 		return FALSE;
 
+	/* Get all registers from elf notes*/
+	if (!bt_info.need_free) {
+		goto get_all;
+	}
+
+	/* Get subset registers from stack frame*/
+	switch (ur_bitmap->bitmap) {
+	case 0x5003f:
+		switch (regno) {
+		case R12_REGNUM ... R15_REGNUM:
+		case RBP_REGNUM:
+		case RBX_REGNUM:
+		case RIP_REGNUM:
+		case RSP_REGNUM:
+			break;
+		default:
+			return FALSE;
+		}
+		break;
+	case 0x50010:
+		switch (regno) {
+		case RBP_REGNUM:
+		case RIP_REGNUM:
+		case RSP_REGNUM:
+			break;
+		default:
+			return FALSE;
+		}
+		break;
+	case 0x50000:
+		switch (regno) {
+		case RIP_REGNUM:
+		case RSP_REGNUM:
+			break;
+		default:
+			return FALSE;
+		}
+		break;
+	}
+
+get_all:
 	switch (regno) {
 		REG_CASE(RAX,   ax);
 		REG_CASE(RBX,   bx);
@@ -9253,7 +9308,7 @@ x86_64_get_current_task_reg(int regno, const char *name,
 	}
 
 	if (bt_info.need_free) {
-		FREEBUF(pt_regs);
+		FREEBUF(ur_bitmap);
 		bt_info.need_free = FALSE;
 	}
 	return ret;
