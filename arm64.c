@@ -116,6 +116,23 @@ static void arm64_get_struct_page_size(struct machine_specific *ms);
 #define mte_tag_reset(addr)	(((ulong)addr & ~mte_tag_shifted(KASAN_TAG_KERNEL)) | \
 					mte_tag_shifted(KASAN_TAG_KERNEL))
 
+struct user_regs_bitmap_struct {
+	struct {
+		union {
+			struct arm64_user_pt_regs user_regs;
+			struct {
+				u64 regs[31];
+				u64 sp;
+				u64 pc;
+				u64 pstate;
+			};
+		};
+		u64 orig_x0;
+		u64 syscallno;
+	};
+	ulong bitmap;
+};
+
 static inline bool is_mte_kvaddr(ulong addr)
 {
 	/* check for ARM64_MTE enabled */
@@ -158,14 +175,12 @@ arm64_get_current_task_reg(int regno, const char *name,
 {
 	struct bt_info bt_info, bt_setup;
 	struct task_context *tc;
-	struct arm64_pt_regs *pt_regs;
+	struct user_regs_bitmap_struct *ur_bitmap;
 	ulong ip, sp;
 	bool ret = FALSE;
 
 	switch (regno) {
-		case X29_REGNUM:
-		case SP_REGNUM:
-		case PC_REGNUM:
+		case X0_REGNUM ... PC_REGNUM:
 		break;
 	default:
 		return FALSE;
@@ -181,36 +196,53 @@ arm64_get_current_task_reg(int regno, const char *name,
 	get_dumpfile_regs(&bt_info, &sp, &ip);
 	if (bt_info.stackbuf)
 		FREEBUF(bt_info.stackbuf);
-	pt_regs = (struct arm64_pt_regs *)bt_info.machdep;
-	if (!pt_regs)
+	ur_bitmap = (struct user_regs_bitmap_struct *)bt_info.machdep;
+	if (!ur_bitmap)
 		return FALSE;
 
+	if (!bt_info.need_free) {
+		goto get_all;
+	}
+	switch (ur_bitmap->bitmap) {
+	case 0x1a0000000:
+		switch (regno) {
+		case X29_REGNUM:
+		case SP_REGNUM:
+		case PC_REGNUM:
+			break;
+		default:
+			return FALSE;
+		}
+		break;
+	}
+
+get_all:
 	switch (regno) {
-	case X29_REGNUM:
-		if (size != sizeof(pt_regs->regs[29])) {
+	case X0_REGNUM ... X30_REGNUM:
+		if (size != sizeof(ur_bitmap->regs[regno])) {
 			ret = FALSE; break;
 		} else {
-			memcpy(value, &pt_regs->regs[29], size);
+			memcpy(value, &ur_bitmap->regs[regno], size);
 			ret = TRUE; break;
 		}
 	case SP_REGNUM:
-                if (size != sizeof(pt_regs->sp)) {
+                if (size != sizeof(ur_bitmap->sp)) {
                         ret = FALSE; break;
                 } else {
-                        memcpy(value, &pt_regs->sp, size);
+                        memcpy(value, &ur_bitmap->sp, size);
                         ret = TRUE; break;
                 }
 	case PC_REGNUM:
-                if (size != sizeof(pt_regs->pc)) {
+                if (size != sizeof(ur_bitmap->pc)) {
                         ret = FALSE; break;
                 } else {
-                        memcpy(value, &pt_regs->pc, size);
+                        memcpy(value, &ur_bitmap->pc, size);
                         ret = TRUE; break;
                 }
 	}
 
 	if (bt_info.need_free) {
-		FREEBUF(pt_regs);
+		FREEBUF(ur_bitmap);
 		bt_info.need_free = FALSE;
 	}
 	return ret;
@@ -3853,7 +3885,7 @@ static void
 arm64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 {
 	int ret;
-	struct arm64_pt_regs *user_regs;
+	struct user_regs_bitmap_struct *ur_bitmap;
 	struct arm64_stackframe stackframe = { 0 };
 
 	if (DUMPFILE() && is_task_active(bt->task)) {
@@ -3872,12 +3904,13 @@ arm64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 		*spp = stackframe.sp;
 
 	if (stackframe.sp) {
-		user_regs = (struct arm64_pt_regs *)GETBUF(sizeof(*user_regs));
-		memset(user_regs, 0, sizeof(*user_regs));
-		user_regs->pc = stackframe.pc;
-		user_regs->sp = stackframe.sp;
-		user_regs->regs[29] = stackframe.fp;
-		bt->machdep = user_regs;
+		ur_bitmap = (struct user_regs_bitmap_struct *)GETBUF(sizeof(*ur_bitmap));
+		memset(ur_bitmap, 0, sizeof(*ur_bitmap));
+		ur_bitmap->pc = stackframe.pc;
+		ur_bitmap->sp = stackframe.sp;
+		ur_bitmap->regs[29] = stackframe.fp;
+		ur_bitmap->bitmap += 0x1a0000000;
+		bt->machdep = ur_bitmap;
 		bt->need_free = TRUE;
 	}
 }
