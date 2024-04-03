@@ -3856,6 +3856,7 @@ arm64_get_dumpfile_stackframe(struct bt_info *bt, struct arm64_stackframe *frame
 try_kernel:
 		frame->sp = ptregs->sp;
 		frame->fp = ptregs->regs[29];
+		bt->machdep = ptregs;
 	}
 
 	if (arm64_in_kdump_text(bt, frame) || 
@@ -3890,11 +3891,21 @@ arm64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 
 	if (DUMPFILE() && is_task_active(bt->task)) {
 		ret = arm64_get_dumpfile_stackframe(bt, &stackframe);
+		bt->need_free = FALSE;
 	} else {
 		if (bt->flags & BT_SKIP_IDLE)
 			bt->flags &= ~BT_SKIP_IDLE;
 
 		ret = arm64_get_stackframe(bt, &stackframe);
+
+                ur_bitmap = (struct user_regs_bitmap_struct *)GETBUF(sizeof(*ur_bitmap));
+                memset(ur_bitmap, 0, sizeof(*ur_bitmap));
+                ur_bitmap->pc = stackframe.pc;
+                ur_bitmap->sp = stackframe.sp;
+                ur_bitmap->regs[29] = stackframe.fp;
+                ur_bitmap->bitmap += 0x1a0000000;
+                bt->machdep = ur_bitmap;
+                bt->need_free = TRUE;
 	}
 
 	bt->frameptr = stackframe.fp;
@@ -3902,17 +3913,6 @@ arm64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 		*pcp = stackframe.pc;
 	if (spp)
 		*spp = stackframe.sp;
-
-	if (stackframe.sp) {
-		ur_bitmap = (struct user_regs_bitmap_struct *)GETBUF(sizeof(*ur_bitmap));
-		memset(ur_bitmap, 0, sizeof(*ur_bitmap));
-		ur_bitmap->pc = stackframe.pc;
-		ur_bitmap->sp = stackframe.sp;
-		ur_bitmap->regs[29] = stackframe.fp;
-		ur_bitmap->bitmap += 0x1a0000000;
-		bt->machdep = ur_bitmap;
-		bt->need_free = TRUE;
-	}
 }
 
 static void
