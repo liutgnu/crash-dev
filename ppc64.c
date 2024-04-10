@@ -55,6 +55,8 @@ static void ppc64_set_bt_emergency_stack(enum emergency_stack_type type,
 static char * ppc64_check_eframe(struct ppc64_pt_regs *);
 static void ppc64_print_eframe(char *, struct ppc64_pt_regs *, 
 		struct bt_info *);
+static int ppc64_get_current_task_reg(int regno, const char *name, int size,
+		  void *value);
 static void parse_cmdline_args(void);
 static int ppc64_paca_percpu_offset_init(int);
 static void ppc64_init_cpu_info(void);
@@ -72,6 +74,26 @@ static ulong pud_page_vaddr_l4(ulong pud);
 static ulong pmd_page_vaddr_l4(ulong pmd);
 static int is_opal_context(ulong sp, ulong nip);
 void opalmsg(void);
+
+struct user_regs_bitmap_struct {
+	struct {
+		long gpr[32];
+		long nip;
+		long msr;
+		long orig_gpr3;      /* Used for restarting system calls */
+		long ctr;
+		long link;
+		long xer;
+		long ccr;
+		long mq;             /* 601 only (not used at present) */
+					/* Used on APUS to hold IPL value. */
+		long trap;           /* Reason for being here */
+		long dar;            /* Fault registers */
+		long dsisr;
+		long result;         /* Result of a system call */
+	};
+	ulong bitmap;
+};
 
 static int is_opal_context(ulong sp, ulong nip)
 {
@@ -703,6 +725,8 @@ ppc64_init(int when)
 			if ((ms->hwstackbuf = (char *)malloc(ms->hwstacksize)) == NULL)
 				error(FATAL, "cannot malloc hwirqstack buffer space.");
 		}
+
+		machdep->get_current_task_reg = ppc64_get_current_task_reg;
 
 		ppc64_init_paca_info();
 
@@ -2501,6 +2525,120 @@ ppc64_print_eframe(char *efrm_str, struct ppc64_pt_regs *regs,
 	ppc64_print_nip_lr(regs, 1);
 }
 
+static int
+ppc64_get_current_task_reg(int regno, const char *name, int size,
+		  void *value)
+{
+	struct bt_info bt_info, bt_setup;
+	struct task_context *tc;
+	ulong task;
+	struct user_regs_bitmap_struct *ur_bitmap;
+	ulong ip, sp;
+	bool ret = FALSE;
+
+	/* Currently only handling registers available in ppc64_pt_regs:
+	 *
+	 * 0-31:   r0-r31
+	 * 64:     pc/nip
+	 * 65:     msr
+	 *
+	 * 67:     lr
+	 * 68:     ctr
+	 */
+	switch (regno) {
+	case PPC64_R0_REGNUM ... PPC64_R31_REGNUM:
+
+	case PPC64_PC_REGNUM:
+	case PPC64_MSR_REGNUM:
+	case PPC64_LR_REGNUM:
+	case PPC64_CTR_REGNUM:
+		break;
+
+	default:
+		// return false if we can't get that register
+		if (CRASHDEBUG(1))
+			error(WARNING, "unsupported register, regno=%d\n", regno);
+		return FALSE;
+	}
+
+	tc = CURRENT_CONTEXT();
+	if (!tc)
+		return FALSE;
+	BZERO(&bt_setup, sizeof(struct bt_info));
+	clone_bt_info(&bt_setup, &bt_info, tc);
+	fill_stackbuf(&bt_info);
+
+	// reusing the get_dumpfile_regs function to get pt regs structure
+	get_dumpfile_regs(&bt_info, &sp, &ip);
+	if (bt_info.stackbuf)
+		FREEBUF(bt_info.stackbuf);
+	ur_bitmap = (struct user_regs_bitmap_struct *)bt_info.machdep;
+
+	if (!ur_bitmap) {
+		error(WARNING, "pt_regs not available for cpu %d\n", tc->processor);
+		return FALSE;
+	}
+	if (!bt_info.need_free) {
+		goto get_all;
+	}
+
+	switch (ur_bitmap->bitmap) {
+	case 0x100000002:
+		switch (regno) {
+		case PPC64_R1_REGNUM:
+		case PPC64_PC_REGNUM:
+			break;
+		default:
+			return FALSE;
+		}
+		break;
+	}
+
+get_all:
+	switch (regno) {
+	case PPC64_R0_REGNUM ... PPC64_R31_REGNUM:
+		if (size != sizeof(ur_bitmap->gpr[regno])) {
+			ret = FALSE; break;  // size mismatch
+		}
+		memcpy(value, &ur_bitmap->gpr[regno], size);
+		ret = TRUE; break;
+
+	case PPC64_PC_REGNUM:
+		if (size != sizeof(ur_bitmap->nip)) {
+			ret = FALSE; break;  // size mismatch
+		}
+		memcpy(value, &ur_bitmap->nip, size);
+		ret = TRUE; break;
+
+	case PPC64_MSR_REGNUM:
+		if (size != sizeof(ur_bitmap->msr)) {
+			ret = FALSE; break;  // size mismatch
+		}
+		memcpy(value, &ur_bitmap->msr, size);
+		ret = TRUE; break;
+
+	case PPC64_LR_REGNUM:
+		if (size != sizeof(ur_bitmap->link)) {
+			ret = FALSE; break;  // size mismatch
+		}
+		memcpy(value, &ur_bitmap->link, size);
+		ret = TRUE; break;
+
+	case PPC64_CTR_REGNUM:
+		if (size != sizeof(ur_bitmap->ctr)) {
+			ret = FALSE; break;  // size mismatch
+		}
+		memcpy(value, &ur_bitmap->ctr, size);
+		ret = TRUE; break;
+	}
+	if (bt_info.need_free) {
+		FREEBUF(ur_bitmap);
+		bt_info.need_free = FALSE;
+	}
+
+	return ret;
+}
+
 /*
  * For vmcore typically saved with KDump or FADump, get SP and IP values
  * from the saved ptregs.
@@ -2613,9 +2751,11 @@ ppc64_get_dumpfile_stack_frame(struct bt_info *bt_in, ulong *nip, ulong *ksp)
 		pt_regs = (struct ppc64_pt_regs *)bt->machdep;
 		ur_nip = pt_regs->nip;
 		ur_ksp = pt_regs->gpr[1];
-		/* Print the collected regs for panic task. */
-		ppc64_print_regs(pt_regs);
-		ppc64_print_nip_lr(pt_regs, 1);
+		if (!(bt->flags & BT_NO_PRINT_REGS)) {
+			/* Print the collected regs for panic task. */
+			ppc64_print_regs(pt_regs);
+			ppc64_print_nip_lr(pt_regs, 1);
+		}
 	} else if ((pc->flags & KDUMP) ||
 		   ((pc->flags & DISKDUMP) &&
 		    (*diskdump_flags & KDUMP_CMPRS_LOCAL))) {
@@ -2779,19 +2919,28 @@ static void
 ppc64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 {
 	ulong ksp, nip;
-	
+	struct user_regs_bitmap_struct *ur_bitmap;
+
 	nip = ksp = 0;
 
-	if (DUMPFILE() && is_task_active(bt->task)) 
+	if (DUMPFILE() && is_task_active(bt->task)) {
 		ppc64_get_dumpfile_stack_frame(bt, &nip, &ksp);
-	else
+		bt->need_free = FALSE;
+	} else {
 		get_ppc64_frame(bt, &nip, &ksp);
+		ur_bitmap = (struct user_regs_bitmap_struct *)GETBUF(sizeof(*ur_bitmap));
+		memset(ur_bitmap, 0, sizeof(*ur_bitmap));
+		ur_bitmap->nip = nip;
+		ur_bitmap->gpr[1] = ksp;
+		ur_bitmap->bitmap += 0x100000002;
+		bt->machdep = ur_bitmap;
+		bt->need_free = TRUE;
+	}
 
 	if (pcp)
 		*pcp = nip;
 	if (spp)
 		*spp = ksp;
-
 }
 
 static ulong
