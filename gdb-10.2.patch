@@ -16171,3 +16171,29 @@ exit 0
  }
  
  /*
+--- gdb-10.2/gdb/frame.c.orig
++++ gdb-10.2/gdb/frame.c
+@@ -2331,6 +2331,10 @@ inside_entry_func (frame_info *this_frame)
+    This function should not contain target-dependent tests, such as
+    checking whether the program-counter is zero.  */
+ 
++#ifdef CRASH_MERGE
++extern "C" int is_kvaddr(ulong);
++#endif
++
+ struct frame_info *
+ get_prev_frame (struct frame_info *this_frame)
+ {
+@@ -2353,7 +2357,11 @@ get_prev_frame (struct frame_info *this_frame)
+     get_frame_id (this_frame);
+ 
+   frame_pc_p = get_frame_pc_if_available (this_frame, &frame_pc);
+-
++#ifdef CRASH_MERGE
++  if (!is_kvaddr(frame_pc)) {
++        return NULL;
++  }
++#endif
+   /* tausq/2004-12-07: Dummy frames are skipped because it doesn't make much
+      sense to stop unwinding at a dummy frame.  One place where a dummy
+      frame may have an address "inside_main_func" is on HPUX.  On HPUX, the
