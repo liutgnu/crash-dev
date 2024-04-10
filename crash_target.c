@@ -28,7 +28,7 @@ void crash_target_init (void);
 extern "C" int gdb_readmem_callback(unsigned long, void *, int, int);
 extern "C" int crash_get_cpu_reg (int cpu, int regno, const char *regname,
                                   int regsize, void *val);
-
+extern "C" int gdb_change_thread_context ();
 
 /* The crash target.  */
 
@@ -63,16 +63,21 @@ public:
 
 };
 
-/* We just get all the registers, so we don't use regno.  */
 void
 crash_target::fetch_registers (struct regcache *regcache, int regno)
 {
+  int r;
   gdb_byte regval[16];
-  int cpu = inferior_ptid.tid();
   struct gdbarch *arch = regcache->arch ();
 
-  for (int r = 0; r < gdbarch_num_regs (arch); r++)
+  if (regno >= 0) {
+    r = regno;
+    goto onetime;
+  }
+
+  for (r = 0; regno == -1 && r < gdbarch_num_regs (arch); r++)
     {
+onetime:
       const char *regname = gdbarch_register_name(arch, r);
       int regsize = register_size (arch, r);
       if (regsize > sizeof (regval))
@@ -128,4 +133,12 @@ crash_target_init (void)
 
   /* Now, set up the frame cache. */
   reinit_frame_cache ();
+}
+
+extern "C" int
+gdb_change_thread_context ()
+{
+  target_fetch_registers(get_current_regcache(), -1);
+  reinit_frame_cache();
+  return TRUE;
 }
