@@ -9232,7 +9232,10 @@ x86_64_get_current_task_reg(int regno, const char *name,
 	if (!tc)
 		return FALSE;
 
-	if (VMSS_DUMPFILE())
+	/*
+	 * Task is active, grab CPU's registers
+	 */
+	if (is_task_active(tc->task) && VMSS_DUMPFILE())
 		return vmware_vmss_get_cpu_reg(tc->processor, regno, name, size, value);
 
 	BZERO(&bt_setup, sizeof(struct bt_info));
