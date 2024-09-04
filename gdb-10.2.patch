@@ -16203,3 +16203,14 @@ exit 0
  	  print_frame_info (fp_opts, fi, 1, LOCATION, 1, 0);
  	  if ((flags & PRINT_LOCALS) != 0)
  	    {
+--- gdb-10.2/gdb/stack.c.orig
++++ gdb-10.2/gdb/stack.c
+@@ -2127,7 +2127,7 @@
+ 	  enum unwind_stop_reason reason;
+ 
+ 	  reason = get_frame_unwind_stop_reason (trailing);
+-	  if (reason >= UNWIND_FIRST_ERROR)
++	  if (reason >= UNWIND_FIRST_ERROR && gdb_CRASHDEBUG(1))
+ 	    printf_filtered (_("Backtrace stopped: %s\n"),
+ 			     frame_stop_reason_string (trailing));
+ 	}
