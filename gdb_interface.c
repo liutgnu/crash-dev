@@ -1067,25 +1067,8 @@ unsigned long crash_get_kaslr_offset(void)
 }
 
 /* Callbacks for crash_target */
-int crash_get_nr_cpus(void);
 int crash_get_cpu_reg (int cpu, int regno, const char *regname,
                        int regsize, void *val);
-
-int crash_get_nr_cpus(void)
-{
-        if (SADUMP_DUMPFILE())
-                return sadump_get_nr_cpus();
-        else if (DISKDUMP_DUMPFILE())
-                return diskdump_get_nr_cpus();
-        else if (KDUMP_DUMPFILE())
-                return kdump_get_nr_cpus();
-        else if (VMSS_DUMPFILE())
-                return vmware_vmss_get_nr_cpus();
-
-        /* Just CPU #0 */
-        return 1;
-}
-
 int crash_get_cpu_reg (int cpu, int regno, const char *regname,
                        int regsize, void *value)
 {
