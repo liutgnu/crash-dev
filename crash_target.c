@@ -26,7 +26,7 @@
 void crash_target_init (void);
 
 extern "C" int gdb_readmem_callback(unsigned long, void *, int, int);
-extern "C" int crash_get_cpu_reg (int cpu, int regno, const char *regname,
+extern "C" int crash_get_current_task_reg (int regno, const char *regname,
                                   int regsize, void *val);
 extern "C" int gdb_change_thread_context (void);
 
@@ -66,7 +66,6 @@ public:
 static void supply_registers(struct regcache *regcache, int regno)
 {
   gdb_byte regval[16];
-  int cpu = inferior_ptid.tid();
   struct gdbarch *arch = regcache->arch ();
   const char *regname = gdbarch_register_name(arch, regno);
   int regsize = register_size(arch, regno);
@@ -74,7 +73,7 @@ static void supply_registers(struct regcache *regcache, int regno)
   if (regsize > sizeof (regval))
     error (_("fatal error: buffer size is not enough to fit register value"));
 
-  if (crash_get_cpu_reg (cpu, regno, regname, regsize, (void *)&regval))
+  if (crash_get_current_task_reg (regno, regname, regsize, (void *)&regval))
     regcache->raw_supply (regno, regval);
   else
     regcache->raw_supply (regno, NULL);
