@@ -16171,3 +16171,35 @@ exit 0
  }
  
  /*
+--- gdb-10.2/gdb/stack.c.orig
++++ gdb-10.2/gdb/stack.c
+@@ -1990,6 +1990,11 @@
+ /* Print briefly all stack frames or just the innermost COUNT_EXP
+    frames.  */
+ 
++#ifdef CRASH_MERGE
++extern "C" int is_kvaddr(ulong);
++extern "C" int gdb_CRASHDEBUG(ulong);
++#endif
++
+ static void
+ backtrace_command_1 (const frame_print_options &fp_opts,
+ 		     const backtrace_cmd_options &bt_opts,
+@@ -2082,6 +2086,17 @@
+ 	     hand, perhaps the code does or could be fixed to make sure
+ 	     the frame->prev field gets set to NULL in that case).  */
+ 
++#ifdef CRASH_MERGE
++	  CORE_ADDR pc = 0;
++	  get_frame_pc_if_available (fi, &pc);
++	  if (!is_kvaddr(pc)) {
++	    if (gdb_CRASHDEBUG(1)) {
++	      printf_filtered (_("Backtrace stopped: due to non-kernel addr: 0x%lx\n"),pc);
++	    }
++	    fi = NULL;
++	    break;
++	  }
++#endif
+ 	  print_frame_info (fp_opts, fi, 1, LOCATION, 1, 0);
+ 	  if ((flags & PRINT_LOCALS) != 0)
+ 	    {
