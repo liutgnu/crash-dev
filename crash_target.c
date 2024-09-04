@@ -29,6 +29,7 @@ extern "C" int gdb_readmem_callback(unsigned long, void *, int, int);
 extern "C" int crash_get_current_task_reg (int regno, const char *regname,
                                   int regsize, void *val);
 extern "C" int gdb_change_thread_context (void);
+extern "C" void crash_get_current_task_info(unsigned long *pid, char **comm);
 
 /* The crash target.  */
 
@@ -59,7 +60,12 @@ public:
   bool has_registers () override { return true; }
   bool thread_alive (ptid_t ptid) override { return true; }
   std::string pid_to_str (ptid_t ptid) override
-  { return string_printf ("CPU %ld", ptid.tid ()); }
+  {
+    unsigned long pid;
+    char *comm;
+    crash_get_current_task_info(&pid, &comm);
+    return string_printf ("%ld %s", pid, comm);
+  }
 
 };
 

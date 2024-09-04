@@ -120,6 +120,7 @@ static int has_sched_policy(ulong, ulong);
 static ulong task_policy(ulong);
 static ulong sched_policy_bit_from_str(const char *);
 static ulong make_sched_policy(const char *);
+void crash_get_current_task_info(unsigned long *, char **);
 
 static struct sched_policy_info {
 	ulong value;
@@ -11295,4 +11296,12 @@ check_stack_end_magic:
 
 	if (!total)
 		fprintf(fp, "No stack overflows detected\n");
+}
+
+void crash_get_current_task_info(unsigned long *pid, char **comm)
+{
+	struct task_context *tc = CURRENT_CONTEXT();
+
+	*pid = tc->pid;
+	*comm = tc->comm;
 }
