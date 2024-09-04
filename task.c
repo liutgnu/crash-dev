@@ -679,7 +679,7 @@ task_init(void)
 	if (ACTIVE()) {
 		active_pid = REMOTE() ? pc->server_pid :
 			LOCAL_ACTIVE() ? pc->program_pid : 1;
-		set_context(NO_TASK, active_pid);
+		set_context(NO_TASK, active_pid, FALSE);
 		tt->this_task = pid_to_task(active_pid);
 	}
 	else {
@@ -691,7 +691,7 @@ task_init(void)
 		else if (ELF_NOTES_VALID() && DISKDUMP_DUMPFILE())
 			map_cpus_to_prstatus_kdump_cmprs();
 		please_wait("determining panic task");
-		set_context(get_panic_context(), NO_PID);
+		set_context(get_panic_context(), NO_PID, TRUE);
 		please_wait_done();
 	}
 
@@ -2992,9 +2992,9 @@ refresh_context(ulong curtask, ulong curpid)
 	struct task_context *tc;
 
 	if (task_exists(curtask) && pid_exists(curpid)) {
-                set_context(curtask, NO_PID);
+                set_context(curtask, NO_PID, FALSE);
         } else {
-                set_context(tt->this_task, NO_PID);
+                set_context(tt->this_task, NO_PID, FALSE);
 
                 complain = TRUE;
                 if (STREQ(args[0], "set") && (argcnt == 2) &&
@@ -3060,7 +3060,7 @@ sort_context_array(void)
 	curtask = CURRENT_TASK();
 	qsort((void *)tt->context_array, (size_t)tt->running_tasks,
         	sizeof(struct task_context), sort_by_pid);
-	set_context(curtask, NO_PID);
+	set_context(curtask, NO_PID, TRUE);
 
 	sort_context_by_task();
 }
@@ -3107,7 +3107,7 @@ sort_context_array_by_last_run(void)
 	curtask = CURRENT_TASK();
 	qsort((void *)tt->context_array, (size_t)tt->running_tasks,
         	sizeof(struct task_context), sort_by_last_run);
-	set_context(curtask, NO_PID);
+	set_context(curtask, NO_PID, TRUE);
 
 	sort_context_by_task();
 }
@@ -5288,11 +5288,15 @@ comm_exists(char *s)
  *  that pid is selected.
  */
 int
-set_context(ulong task, ulong pid)
+set_context(ulong task, ulong pid, uint update_gdb_thread)
 {
 	int i;
 	struct task_context *tc;
 	int found;
+
+	if (CURRENT_CONTEXT() &&
+	    (CURRENT_TASK() == task || CURRENT_PID() == pid))
+		return TRUE;
 
 	tc = FIRST_CONTEXT();
 
@@ -5308,7 +5312,12 @@ set_context(ulong task, ulong pid)
 
 	if (found) {
 		CURRENT_CONTEXT() = tc;
-		return TRUE;
+
+		/* change the selected thread in gdb, according to current context */
+		if (update_gdb_thread)
+			return gdb_change_thread_context();
+		else
+			return TRUE;
 	} else {
 		if (task) 
 			error(INFO, "cannot set context for task: %lx\n", task);
