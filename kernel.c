@@ -7382,10 +7382,12 @@ generic_get_irq_affinity(int irq)
 	if (!action)
 		return;
 
-	len = DIV_ROUND_UP(kt->cpus, BITS_PER_LONG) * sizeof(ulong);
-	len_cpumask = STRUCT_SIZE("cpumask_t");
-	if (len_cpumask > 0)
-		len = len_cpumask > len ? len : len_cpumask;
+	if (!XEN_HYPER_MODE() || (len = xen_get_cpumask_size()) < 0) {
+		len = DIV_ROUND_UP(kt->cpus, BITS_PER_LONG) * sizeof(ulong);
+		len_cpumask = STRUCT_SIZE("cpumask_t");
+		if (len_cpumask > 0)
+			len = len_cpumask > len ? len : len_cpumask;
+	}
 
 	affinity = (ulong *)GETBUF(len);
 	if (VALID_MEMBER(irq_common_data_affinity))

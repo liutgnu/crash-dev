@@ -8063,6 +8063,9 @@ extern int have_full_symbols(void);
 
 #if defined(X86) || defined(X86_64) || defined(IA64)
 #define XEN_HYPERVISOR_ARCH 
+long xen_get_cpumask_size(void);
+#else
+#define xen_get_cpumask_size() -1
 #endif
 
 /*

@@ -2201,4 +2201,13 @@ xen_hyper_print_bt_header(FILE *out, ulong vcpu, int newline)
 		error(FATAL, "invalid vcpu\n");
 	fprintf(out, "PCPU: %2d  VCPU: %lx\n", vcc->processor, vcpu);
 }
+
+long
+xen_get_cpumask_size(void)
+{
+	if (XEN_HYPER_VALID_SIZE(cpumask_t))
+		return XEN_HYPER_SIZE(cpumask_t);
+	else
+		return -1;
+}
 #endif

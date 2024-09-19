@@ -6720,6 +6720,9 @@ get_cpumask_buf(void)
 {
 	int cpulen, len_cpumask;
 
+	if (XEN_HYPER_MODE() && (cpulen = xen_get_cpumask_size()) >= 0)
+		return (ulong *)GETBUF(cpulen);
+
 	cpulen = DIV_ROUND_UP(kt->cpus, BITS_PER_LONG) * sizeof(ulong);
 	len_cpumask = STRUCT_SIZE("cpumask_t");
 	if (len_cpumask > 0)
