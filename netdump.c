@@ -646,11 +646,11 @@ resize_elf_header(int fd, char *file, char **eheader_ptr, char **sect0_ptr,
 }
 
 /*
- *  Return the e_version number of an ELF file
+ *  Return the e_version & e_flags number of an ELF file
  *  (or -1 if its not readable ELF file)
  */
 int
-file_elf_version(char *file)
+file_elf_header(char *file, char *member)
 {
 	int fd, size;
 	Elf32_Ehdr *elf32;
@@ -680,11 +680,17 @@ file_elf_version(char *file)
 	    (elf32->e_ident[EI_CLASS] == ELFCLASS32) &&
   	    (elf32->e_ident[EI_DATA] == ELFDATA2LSB) &&
     	    (elf32->e_ident[EI_VERSION] == EV_CURRENT)) {
-		return (elf32->e_version);
+		if (STRNEQ(member, "e_version"))
+			return (elf32->e_version);
+		else if (STRNEQ(member, "e_flags"))
+			return (elf32->e_flags);
 	} else if (STRNEQ(elf64->e_ident, ELFMAG) &&
 	    (elf64->e_ident[EI_CLASS] == ELFCLASS64) &&
 	    (elf64->e_ident[EI_VERSION] == EV_CURRENT)) {
-		return (elf64->e_version);
+		if (STRNEQ(member, "e_version"))
+			return (elf64->e_version);
+		else if (STRNEQ(member, "e_flags"))
+			return (elf64->e_flags);
 	} 
 	
 	return -1;

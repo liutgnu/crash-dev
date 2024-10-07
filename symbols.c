@@ -216,7 +216,7 @@ symtab_init(void)
 	 *  Check whether the namelist is a kerntypes file built by
 	 *  dwarfextract, which places a magic number in e_version.
 	 */
-	if (file_elf_version(pc->namelist) == EV_DWARFEXTRACT)
+	if (file_elf_header(pc->namelist, "e_version") == EV_DWARFEXTRACT)
 		pc->flags |= KERNTYPES;
 
 	if (pc->flags & SYSMAP) {
@@ -13020,7 +13020,8 @@ load_module_symbols(char *modref, char *namelist, ulong base_addr)
 		error(FATAL, "cannot determine object file format: %s\n",
 			namelist);
 
-	if (LKCD_KERNTYPES() && (file_elf_version(namelist) == EV_DWARFEXTRACT))
+	if (LKCD_KERNTYPES() &&
+	    (file_elf_header(namelist, "e_version") == EV_DWARFEXTRACT))
 		goto add_symbols;   /* no symbols, add the debuginfo */
 
 	if (!(bfd_get_file_flags(mbfd) & HAS_SYMS))

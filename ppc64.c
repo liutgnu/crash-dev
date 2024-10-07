@@ -74,6 +74,7 @@ static ulong pud_page_vaddr_l4(ulong pud);
 static ulong pmd_page_vaddr_l4(ulong pmd);
 static int is_opal_context(ulong sp, ulong nip);
 void opalmsg(void);
+static bool is_ppc64_elf_abi_v2(void);
 
 struct user_regs_bitmap_struct {
 	struct ppc64_pt_regs ur;
@@ -2973,6 +2974,25 @@ ppc64_get_sp(ulong task)
 	return sp;
 }
 
+static bool
+is_ppc64_elf_abi_v2(void)
+{
+	static bool ret = false;
+	static bool checked = false;
+
+	if (checked)
+		return ret;
+	switch (file_elf_header(pc->namelist, "e_flags")) {
+	case 2:
+		ret = true;
+	case 1:
+		break;
+	default:
+		error(WARNING, "Unstable elf_abi v1/v2 detection.\n");
+	}
+	checked = true;
+	return ret;
+}
 
 /*
  *  get the SP and PC values for idle tasks.
@@ -2994,9 +3014,17 @@ get_ppc64_frame(struct bt_info *bt, ulong *getpc, ulong *getsp)
 	sp = ppc64_get_sp(task);
 	if (!INSTACK(sp, bt))
 		goto out;
-	readmem(sp+STACK_FRAME_OVERHEAD, KVADDR, &regs, 
-		sizeof(struct ppc64_pt_regs),
-		"PPC64 pt_regs", FAULT_ON_ERROR);
+
+	if (THIS_KERNEL_VERSION >= LINUX(6,2,0) && is_ppc64_elf_abi_v2()) {
+		readmem(sp+STACK_SWITCH_FRAME_REGS, KVADDR, &regs,
+			sizeof(struct ppc64_pt_regs),
+			"PPC64 pt_regs", FAULT_ON_ERROR);
+	} else {
+		readmem(sp+STACK_FRAME_OVERHEAD, KVADDR, &regs,
+			sizeof(struct ppc64_pt_regs),
+			"PPC64 pt_regs", FAULT_ON_ERROR);
+	}
+
 	ip = regs.nip; 
 	closest = closest_symbol(ip);
 	if (STREQ(closest, ".__switch_to") || STREQ(closest, "__switch_to")) {
