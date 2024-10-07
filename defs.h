@@ -4668,7 +4668,11 @@ struct efi_memory_desc_t {
 
 #define STACK_SWITCH_FRAME_REGS         48
 #define STACK_FRAME_OVERHEAD            112
-#define EXCP_FRAME_MARKER               0x7265677368657265
+#define EXCP_FRAME_MARKER \
+	(THIS_KERNEL_VERSION >= LINUX(6,1,0) ? \
+	  (__BYTE_ORDER == __BIG_ENDIAN ? 0x52454753 : 0x53474552) : \
+	0x7265677368657265)	/* See arch/powerpc/include/asm/ptrace.h: */
+				/* STACK_FRAME_REGS_MARKER */
 
 #define _SECTION_SIZE_BITS	24
 #define _MAX_PHYSMEM_BITS	44

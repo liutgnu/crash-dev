@@ -2230,19 +2230,34 @@ ppc64_back_trace(struct gnu_request *req, struct bt_info *bt)
 				eframe_found = TRUE;
 			else if (STREQ(req->name, ".ret_from_except")) 
 				eframe_found = TRUE;
-		} else if ((newsp - req->sp - STACK_FRAME_OVERHEAD) >= 
-				sizeof(struct ppc64_pt_regs)) {
-			 readmem(req->sp+0x60, KVADDR, &marker, 
-				sizeof(ulong), "stack frame", FAULT_ON_ERROR);
-		        if (marker == EXCP_FRAME_MARKER) 
-				eframe_found = TRUE;
+		} else if (THIS_KERNEL_VERSION >= LINUX(6,2,0) && is_ppc64_elf_abi_v2()) {
+			if ((newsp - req->sp - STACK_SWITCH_FRAME_REGS) >=
+			    sizeof(struct ppc64_pt_regs)) {
+				readmem(req->sp+0x20, KVADDR, &marker,
+					sizeof(ulong), "stack frame",
+					FAULT_ON_ERROR);
+			}
+		} else {
+			if ((newsp - req->sp - STACK_FRAME_OVERHEAD) >=
+			    sizeof(struct ppc64_pt_regs)) {
+				readmem(req->sp+0x60, KVADDR, &marker,
+					sizeof(ulong), "stack frame",
+					FAULT_ON_ERROR);
+			}
 		}
-		if (eframe_found) {
+
+		if (eframe_found || marker == EXCP_FRAME_MARKER) {
 			char *efrm_str = NULL;
 			struct ppc64_pt_regs regs;
-			readmem(req->sp+STACK_FRAME_OVERHEAD, KVADDR, &regs,
-				sizeof(struct ppc64_pt_regs),
-				"exception frame", FAULT_ON_ERROR);
+			if (THIS_KERNEL_VERSION >= LINUX(6,2,0) && is_ppc64_elf_abi_v2()) {
+				readmem(req->sp+STACK_SWITCH_FRAME_REGS, KVADDR, &regs,
+					sizeof(struct ppc64_pt_regs),
+					"exception frame", FAULT_ON_ERROR);
+			} else {
+				readmem(req->sp+STACK_FRAME_OVERHEAD, KVADDR, &regs,
+					sizeof(struct ppc64_pt_regs),
+					"exception frame", FAULT_ON_ERROR);
+			}
 
 			efrm_str = ppc64_check_eframe(&regs);
 			if (efrm_str) {
@@ -2453,6 +2468,8 @@ ppc64_check_eframe(struct ppc64_pt_regs *regs)
 		return("Denormalisation");
 	case 0x1700:    
 		return("Altivec Assist");
+	case 0x3000:
+		return("System Call Vectored");
 	}
 	
 	/* No exception frame exists */
