@@ -4666,6 +4666,7 @@ struct efi_memory_desc_t {
 #define MSR_PR_LG	14	/* Problem State / Privilege Level */
 				/* Used to find the user or kernel-mode frame*/
 
+#define STACK_SWITCH_FRAME_REGS         48
 #define STACK_FRAME_OVERHEAD            112
 #define EXCP_FRAME_MARKER               0x7265677368657265
 
@@ -5786,7 +5787,7 @@ void dump_offset_table(char *, ulong);
 int is_elf_file(char *);
 int is_kernel(char *);
 int is_shared_object(char *);
-int file_elf_version(char *);
+int file_elf_header(char *, char *);
 int is_system_map(char *);
 int is_compressed_kernel(char *, char **);
 int select_namelist(char *);
