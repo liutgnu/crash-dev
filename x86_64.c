@@ -161,6 +161,13 @@ struct user_regs_bitmap_struct {
 };
 
 /*
+ * Additional stacks entry registers for gdb target.
+ * See 'gdb info threads'
+ */
+ulong stack_idx;
+struct user_regs_bitmap_struct stacks_regs[MAX_EXCEPTION_STACKS];
+
+/*
  *  Do all necessary machine-specific setup here.  This is called several
  *  times during initialization.
  */
@@ -3551,6 +3558,7 @@ x86_64_low_budget_back_trace_cmd(struct bt_info *bt_in)
 	irq_eframe = 0;
 	last_process_stack_eframe = 0;
 	bt->call_target = NULL;
+	stack_idx = 0;
 	rsp = bt->stkptr;
 	ms = machdep->machspec;
 
@@ -4159,6 +4167,7 @@ x86_64_dwarf_back_trace_cmd(struct bt_info *bt_in)
 	last_process_stack_eframe = 0;
 	bt->call_target = NULL;
 	bt->bptr = 0;
+	stack_idx = 0;
 	rsp = bt->stkptr;
 	if (!rsp) {
 		error(INFO, "cannot determine starting stack pointer\n");
@@ -4546,6 +4555,9 @@ x86_64_back_trace(struct gnu_request *req, struct bt_info *bt)
  *
  */
 
+#define SET_REG_BITMAP(REGMAP, TYPE, MEMBER) \
+	SET_BIT(REGMAP, REG_SEQ(TYPE, MEMBER))
+
 long
 x86_64_exception_frame(ulong flags, ulong kvaddr, char *local,
 	struct bt_info *bt, FILE *ofp)
@@ -4799,6 +4811,18 @@ x86_64_exception_frame(ulong flags, ulong kvaddr, char *local,
 	} else if (machdep->flags & ORC)
 		bt->bptr = rbp;
 
+	/*
+	 * Preserve registers set for each additional in-kernel stack
+	 * up to MAX_EXCEPTION_STACKS.
+	 */
+	if (!(cs & 3) && verified && flags & EFRAME_PRINT &&
+	    stack_idx < MAX_EXCEPTION_STACKS) {
+		memcpy(&stacks_regs[stack_idx].ur, pt_regs_buf, SIZE(pt_regs));
+		for (int i = 0; i < SIZE(pt_regs)/sizeof(long); i++)
+			SET_BIT(stacks_regs[stack_idx].bitmap, i);
+		gdb_add_substack (stack_idx++);
+	}
+
 	if (kvaddr)
 		FREEBUF(pt_regs_buf);
 
@@ -5002,9 +5026,6 @@ get_reg_from_inactive_task_frame(struct bt_info *bt, char *reg_name,
 	return reg_value;
 }
 
-#define SET_REG_BITMAP(REGMAP, TYPE, MEMBER) \
-	SET_BIT(REGMAP, REG_SEQ(TYPE, MEMBER))
-
 /*
  *  Get a stack frame combination of pc and ra from the most relevent spot.
  */
@@ -5092,11 +5113,22 @@ x86_64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 			* ip and sp in the end of the function.
 			*/
 			if (bt->flags & BT_DUMPFILE_SEARCH) {
-				FREEBUF(ur_bitmap);
-				bt->need_free = FALSE;
 				*pcp = pcp_save;
 				*spp = spp_save;
-				return x86_64_get_dumpfile_stack_frame(bt, pcp, spp);
+				/*
+				* pcp/spp_save is read from elf notes, for panic
+				* task, we'll continue to use the original elf
+				* notes to get regs; for other active tasks,
+				* we'll update the sp/ip into our own ur_bitmap.
+				*/
+				x86_64_get_dumpfile_stack_frame(bt, pcp, spp);
+				if (tt->panic_task == bt->task) {
+					FREEBUF(ur_bitmap);
+					bt->need_free = FALSE;
+					return;
+				} else {
+					sp = *spp;
+				}
 			}
 		}
 	} else {
@@ -5106,11 +5138,16 @@ x86_64_get_stack_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 			SET_REG_BITMAP(ur_bitmap->bitmap, x86_64_user_regs_struct, bp);
 		} else {
 			if (bt->flags & BT_DUMPFILE_SEARCH) {
-				FREEBUF(ur_bitmap);
-				bt->need_free = FALSE;
 				*pcp = pcp_save;
 				*spp = spp_save;
-				return x86_64_get_dumpfile_stack_frame(bt, pcp, spp);
+				x86_64_get_dumpfile_stack_frame(bt, pcp, spp);
+				if (tt->panic_task == bt->task) {
+					FREEBUF(ur_bitmap);
+					bt->need_free = FALSE;
+					return;
+				} else {
+					sp = *spp;
+				}
 			}
 		}
 	}
@@ -9256,6 +9293,12 @@ x86_64_get_current_task_reg(int regno, const char *name,
 	if (!tc)
 		return FALSE;
 
+	/* Non zero stack ID, use saved regs */
+	if (sid && sid < MAX_EXCEPTION_STACKS) {
+		ur_bitmap = &stacks_regs[sid - 1];
+		goto get_sub;
+	}
+
 	/*
 	* Task is active, grab CPU's registers
 	*/
@@ -9280,6 +9323,7 @@ x86_64_get_current_task_reg(int regno, const char *name,
 	}
 
 	/* Get subset registers from stack frame*/
+get_sub:
 	switch (regno) {
 		CHECK_REG_CASE(RAX,   ax);
 		CHECK_REG_CASE(RBX,   bx);
@@ -9341,7 +9385,7 @@ get_all:
 		COPY_REG_CASE(ORIG_RAX, orig_ax);
 	}
 
-	if (bt_info.need_free) {
+	if (!sid && bt_info.need_free) {
 		FREEBUF(ur_bitmap);
 		bt_info.need_free = FALSE;
 	}
