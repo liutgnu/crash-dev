@@ -126,6 +126,11 @@ struct user_regs_bitmap_struct {
 	ulong bitmap[32];
 };
 
+#define MAX_EXCEPTION_STACKS 7
+
+ulong stack_idx;
+struct user_regs_bitmap_struct stacks_regs[MAX_EXCEPTION_STACKS];
+
 static inline bool is_mte_kvaddr(ulong addr)
 {
 	/* check for ARM64_MTE enabled */
@@ -222,6 +227,12 @@ arm64_get_current_task_reg(int regno, const char *name,
 	tc = CURRENT_CONTEXT();
 	if (!tc)
 		return FALSE;
+
+	if (sid && sid < MAX_EXCEPTION_STACKS) {
+		ur_bitmap = &stacks_regs[sid - 1];
+		goto get_sub;
+	}
+
 	BZERO(&bt_setup, sizeof(struct bt_info));
 	clone_bt_info(&bt_setup, &bt_info, tc);
 	fill_stackbuf(&bt_info);
@@ -237,25 +248,29 @@ arm64_get_current_task_reg(int regno, const char *name,
 		goto get_all;
 	}
 
+get_sub:
 	switch (regno) {
 	case X0_REGNUM ... X30_REGNUM:
 		if (!NUM_IN_BITMAP(ur_bitmap->bitmap,
 		    REG_SEQ(arm64_pt_regs, regs[0]) + regno - X0_REGNUM)) {
-			FREEBUF(ur_bitmap);
+			if (!sid)
+				FREEBUF(ur_bitmap);
 			return FALSE;
 		}
 		break;
 	case SP_REGNUM:
 		if (!NUM_IN_BITMAP(ur_bitmap->bitmap,
 		    REG_SEQ(arm64_pt_regs, sp))) {
-			FREEBUF(ur_bitmap);
+			if (!sid)
+				FREEBUF(ur_bitmap);
 			return FALSE;
 		}
 		break;
 	case PC_REGNUM:
 		if (!NUM_IN_BITMAP(ur_bitmap->bitmap,
 		    REG_SEQ(arm64_pt_regs, pc))) {
-			FREEBUF(ur_bitmap);
+			if (!sid)
+				FREEBUF(ur_bitmap);
 			return FALSE;
 		}
 		break;
@@ -283,7 +298,7 @@ get_all:
 		break;
 	}
 
-	if (bt_info.need_free) {
+	if (!sid && bt_info.need_free) {
 		FREEBUF(ur_bitmap);
 		bt_info.need_free = FALSE;
 	}
@@ -3643,6 +3658,7 @@ arm64_back_trace_cmd(struct bt_info *bt)
 	int level;
 	ulong exception_frame;
 	FILE *ofp;
+	stack_idx = 0;
 
 	if (bt->flags & BT_OPT_BACK_TRACE) {
 		if (machdep->flags & UNW_4_14) {
@@ -3673,6 +3689,12 @@ arm64_back_trace_cmd(struct bt_info *bt)
 		stackframe.pc = GET_STACK_ULONG(bt->bptr);
 		stackframe.sp = bt->bptr + 8;
 		bt->frameptr = stackframe.sp;
+
+		stacks_regs[stack_idx].ur.pc = stackframe.pc;
+		stacks_regs[stack_idx].ur.sp = stackframe.fp;
+		SET_BIT(stacks_regs[stack_idx].bitmap, REG_SEQ(arm64_pt_regs, pc));
+		SET_BIT(stacks_regs[stack_idx].bitmap, REG_SEQ(arm64_pt_regs, sp));
+		gdb_add_substack (stack_idx++);
 	} else if (bt->hp && bt->hp->esp) {
 		if (arm64_on_irq_stack(bt->tc->processor, bt->hp->esp)) {
 			arm64_set_irq_stack(bt);
@@ -3758,6 +3780,14 @@ arm64_back_trace_cmd(struct bt_info *bt)
 			bt->flags &= ~BT_IRQSTACK;
 			if (arm64_switch_stack(bt, &stackframe, ofp) == USER_MODE)
 				break;
+			else if (tt->panic_task == bt->task) {
+				memcpy(&stacks_regs[stack_idx].ur,
+				       &bt->stackbuf[(ulong)(STACK_OFFSET_TYPE(exception_frame))],
+				       sizeof(struct arm64_pt_regs));
+				for (int i = 0; i < sizeof(struct arm64_pt_regs)/sizeof(long); i++)
+					SET_BIT(stacks_regs[stack_idx].bitmap, i);
+				gdb_add_substack (stack_idx++);
+			}
 		}
 
 		if ((bt->flags & BT_OVERFLOW_STACK) &&
@@ -3807,6 +3837,12 @@ arm64_back_trace_cmd_v2(struct bt_info *bt)
 		stackframe.pc = GET_STACK_ULONG(bt->bptr + 8);
 		stackframe.sp = bt->bptr + 16;
 		bt->frameptr = stackframe.fp;
+
+		stacks_regs[stack_idx].ur.pc = stackframe.pc;
+		stacks_regs[stack_idx].ur.sp = stackframe.fp;
+		SET_BIT(stacks_regs[stack_idx].bitmap, REG_SEQ(arm64_pt_regs, pc));
+		SET_BIT(stacks_regs[stack_idx].bitmap, REG_SEQ(arm64_pt_regs, sp));
+		gdb_add_substack (stack_idx++);
 	} else {
 		if (arm64_on_irq_stack(bt->tc->processor, bt->frameptr)) {
 			arm64_set_irq_stack(bt);
