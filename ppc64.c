@@ -80,6 +80,11 @@ struct user_regs_bitmap_struct {
 	ulong bitmap[32];
 };
 
+#define MAX_EXCEPTION_STACKS 7
+
+ulong stack_idx;
+struct user_regs_bitmap_struct stacks_regs[MAX_EXCEPTION_STACKS];
+
 static int is_opal_context(ulong sp, ulong nip)
 {
 	uint64_t opal_start, opal_end;
@@ -2049,6 +2054,7 @@ ppc64_back_trace_cmd(struct bt_info *bt)
 	char buf[BUFSIZE];
 	struct gnu_request *req;
 	extern void print_stack_text_syms(struct bt_info *, ulong, ulong);
+	stack_idx = 0;
 
         bt->flags |= BT_EXCEPTION_FRAME;
 
@@ -2066,6 +2072,17 @@ ppc64_back_trace_cmd(struct bt_info *bt)
 
         req->pc = bt->instptr;
         req->sp = bt->stkptr;
+
+	if (tt->panic_task == bt->task) {
+		struct ppc64_pt_regs *pr = (struct ppc64_pt_regs *)bt->machdep;
+		if (pr->nip != req->pc || pr->gpr[1] != req->sp) {
+			stacks_regs[stack_idx].ur.nip = req->pc;
+			stacks_regs[stack_idx].ur.gpr[1] = req->sp;
+			SET_BIT(stacks_regs[stack_idx].bitmap, REG_SEQ(ppc64_pt_regs, nip));
+			SET_BIT(stacks_regs[stack_idx].bitmap, REG_SEQ(ppc64_pt_regs, gpr[0]) + 1);
+			gdb_add_substack (stack_idx++);
+		}
+	}
 
 	if (bt->flags &
 	(BT_TEXT_SYMBOLS|BT_TEXT_SYMBOLS_PRINT|BT_TEXT_SYMBOLS_NOPRINT)) {
@@ -2548,6 +2565,12 @@ ppc64_get_current_task_reg(int regno, const char *name, int size,
 	tc = CURRENT_CONTEXT();
 	if (!tc)
 		return FALSE;
+
+	if (sid && sid < MAX_EXCEPTION_STACKS) {
+		ur_bitmap = &stacks_regs[sid - 1];
+		goto get_sub;
+	}
+
 	BZERO(&bt_setup, sizeof(struct bt_info));
 	clone_bt_info(&bt_setup, &bt_info, tc);
 	fill_stackbuf(&bt_info);
@@ -2566,39 +2589,45 @@ ppc64_get_current_task_reg(int regno, const char *name, int size,
 		goto get_all;
 	}
 
+get_sub:
 	switch (regno) {
 	case PPC64_R0_REGNUM ... PPC64_R31_REGNUM:
 		if (!NUM_IN_BITMAP(ur_bitmap->bitmap,
 		    REG_SEQ(ppc64_pt_regs, gpr[0]) + regno - PPC64_R0_REGNUM)) {
-			FREEBUF(ur_bitmap);
+			if (!sid)
+				FREEBUF(ur_bitmap);
 			return FALSE;
 		}
 		break;
 	case PPC64_PC_REGNUM:
 		if (!NUM_IN_BITMAP(ur_bitmap->bitmap,
 		    REG_SEQ(ppc64_pt_regs, nip))) {
-			FREEBUF(ur_bitmap);
+			if (!sid)
+				FREEBUF(ur_bitmap);
 			return FALSE;
 		}
 		break;
 	case PPC64_MSR_REGNUM:
 		if (!NUM_IN_BITMAP(ur_bitmap->bitmap,
 		    REG_SEQ(ppc64_pt_regs, msr))) {
-			FREEBUF(ur_bitmap);
+			if (!sid)
+				FREEBUF(ur_bitmap);
 			return FALSE;
 		}
 		break;
 	case PPC64_LR_REGNUM:
 		if (!NUM_IN_BITMAP(ur_bitmap->bitmap,
 		    REG_SEQ(ppc64_pt_regs, link))) {
-			FREEBUF(ur_bitmap);
+			if (!sid)
+				FREEBUF(ur_bitmap);
 			return FALSE;
 		}
 		break;
 	case PPC64_CTR_REGNUM:
 		if (!NUM_IN_BITMAP(ur_bitmap->bitmap,
 		    REG_SEQ(ppc64_pt_regs, ctr))) {
-			FREEBUF(ur_bitmap);
+			if (!sid)
+				FREEBUF(ur_bitmap);
 			return FALSE;
 		}
 		break;
@@ -2641,7 +2670,7 @@ get_all:
 		ret = TRUE;
 		break;
 	}
-	if (bt_info.need_free) {
+	if (!sid && bt_info.need_free) {
 		FREEBUF(ur_bitmap);
 		bt_info.need_free = FALSE;
 	}
