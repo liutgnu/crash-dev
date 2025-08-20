@@ -820,7 +820,7 @@ main_loop(void)
         pc->flags |= RUNTIME;
 
 	if (pc->flags & PRELOAD_EXTENSIONS)
-		preload_extensions();
+		preload_extensions(NULL);
 
 	/*
 	 *  Return here if a non-recoverable error occurs

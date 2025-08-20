@@ -19,7 +19,7 @@
 #include <dlfcn.h>
 
 static int in_extensions_library(char *, char *);
-static char *get_extensions_directory(char *);
+static char *get_extensions_directory(char *, bool *);
 static void show_all_extensions(void);
 static void show_extensions(char *);
 
@@ -395,51 +395,58 @@ in_extensions_library(char *lib, char *buf)
  * Look for an extensions directory using the proper order. 
  */
 static char *
-get_extensions_directory(char *dirbuf)
+get_extensions_directory(char *dirbuf, bool *end)
 {
-	char *env;
+	static int index = 0;
+	char *dirs[] = {
+		getenv("CRASH_EXTENSIONS"),
+		"/usr/lib64/crash/extensions",
+		"/usr/lib/crash/extensions",
+		"./extensions",
+	};
+	char *dir;
 
-	if ((env = getenv("CRASH_EXTENSIONS"))) {
-		if (is_directory(env)) {
-			strcpy(dirbuf, env);
-			return dirbuf;
+retry:
+	if (index >= sizeof(dirs) / sizeof(char *)) {
+		*end = true;
+		return NULL;
+	}
+	*end = false;
+	dir = dirs[index++];
+	if (is_directory(dir)) {
+		if (!BITS64() && strstr(dir, "/usr/lib64")) {
+			goto retry;
 		}
+		snprintf(dirbuf, BUFSIZE, "%s", dir);
+		return dir;
+	} else {
+		return NULL;
 	}
-
-	if (BITS64()) {
-		sprintf(dirbuf, "/usr/lib64/crash/extensions");
-		if (is_directory(dirbuf))
-			return dirbuf;
-	}
-
-       	sprintf(dirbuf, "/usr/lib/crash/extensions");
-	if (is_directory(dirbuf))
-		return dirbuf;
- 
-       	sprintf(dirbuf, "./extensions");
-	if (is_directory(dirbuf))
-		return dirbuf;
-
-	return NULL;
 }
 
 
 void
-preload_extensions(void)
+preload_extensions(char *so_name)
 {
 	DIR *dirp;
 	struct dirent *dp;
 	char dirbuf[BUFSIZE];
 	char filename[BUFSIZE*2];
 	int found;
+	bool end;
 
-	if (!get_extensions_directory(dirbuf))
-		return;
+next_dir:
+	if (!get_extensions_directory(dirbuf, &end)) {
+		if (end)
+			return;
+		else
+			goto next_dir;
+	}
 
         dirp = opendir(dirbuf);
 	if (!dirp) {
 		error(INFO, "%s: %s\n", dirbuf, strerror(errno));
-		return;
+		goto next_dir;
 	}
 
 	pc->curcmd = pc->program_name;
@@ -452,19 +459,27 @@ preload_extensions(void)
 		if (!is_shared_object(filename))
 			continue;
 
-		found++;
-
-		load_extension(dp->d_name);
+		if (!so_name) {
+			found++;
+			load_extension(dp->d_name);
+		} else if (so_name && !strcmp(so_name, dp->d_name)) {
+			found++;
+			load_extension(dp->d_name);
+			break;
+		}
 	}
 
 	closedir(dirp);
 	
 	if (found)
 		fprintf(fp, "\n");
-	else
-		error(NOTE, 
-		    "%s: no extension modules found in directory\n\n",
-			dirbuf);
+	else {
+		if (!so_name || (so_name && CRASHDEBUG(1)))
+			error(NOTE,
+			"%s: no extension modules found in directory\n\n",
+				dirbuf);
+		goto next_dir;
+	}
 }
 
 /*

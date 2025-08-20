@@ -6186,7 +6186,7 @@ void register_extension(struct command_table_entry *);
 void dump_extension_table(int);
 void load_extension(char *);
 void unload_extension(char *);
-void preload_extensions(void);
+void preload_extensions(char *);
 /* Hooks for sial */
 unsigned long get_curtask(void);
 char *crash_global_cmd(void);
