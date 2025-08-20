@@ -53,7 +53,18 @@ all:
 			fi; \
 			if  [ -f $(APPFILE) ]; \
 			then \
-				make -f eppic.mk eppic.so; \
+				pushd eppic >/dev/null; \
+				if patch --dry-run -N -p0 < ../eppic.patch >/dev/null ; then \
+					patch -N -p0 < ../eppic.patch; \
+					popd >/dev/null; \
+					make -f eppic.mk eppic.so; \
+				elif patch --dry-run -N -p0 -R < ../eppic.patch >/dev/null ; then \
+					popd >/dev/null; \
+					make -f eppic.mk eppic.so; \
+				else \
+					popd >/dev/null; \
+					echo "eppic.so: apply eppic.patch error"; \
+				fi; \
 			else \
 				echo "eppic.so: failed to pull eppic code from git repo"; \
 			fi; \
@@ -68,7 +79,7 @@ lib-eppic:
 	cd eppic/libeppic && make
 
 eppic.so: ../defs.h $(APPFILE) lib-eppic
-	gcc -g -O0 -Ieppic/libeppic -I.. -nostartfiles -shared -rdynamic -o eppic.so $(APPFILE) -fPIC $(TARGET_FLAGS) $(GDB_FLAGS) -Leppic/libeppic -leppic
+	gcc -g -O0 -Ieppic/libeppic -I.. -nostartfiles -shared -rdynamic -o eppic.so $(APPFILE) -fPIC $(TARGET_FLAGS) $(GDB_FLAGS) -Leppic/libeppic -leppic -lffi
 
 clean:
 	if  [ -d eppic/libeppic ]; \

@@ -1,0 +1,475 @@
+--- applications/crash/eppic.c
++++ applications/crash/eppic.c
+@@ -20,6 +20,12 @@
+ #include "defs.h"
+ 
+ #include <eppic_api.h>
++#include "eppic.h"
++#include <ffi.h>
++#include <dlfcn.h>
++#include <stdio.h>
++#include <stdarg.h>
++#include <limits.h>
+ 
+ /*
+  *  Global data (global_data.c) 
+@@ -643,6 +649,7 @@ FILE *ofp = NULL;
+ }
+ 
+ 
++
+ void
+ edit_cmd(void)
+ {
+@@ -788,6 +795,39 @@ char *sclass_help[]={
+                 NULL
+ };
+ 
++char *eppic_help[]={
++		"eppic",
++                "Run eppic program(es).",
++                "<fileName1.c>[, <fileName2.c>]",
++                "  Oneshot run eppic program(es) which with a main() entry each.",
++                NULL
++};
++
++void
++eppic_command(void)
++{
++	char *buf;
++	optind = 1;
++
++	if (!args[optind]) {
++		cmd_usage(crash_global_cmd(), SYNOPSIS);
++		return;
++	}
++
++	while(args[optind]) {
++		buf = eppic_filempath(args[optind]);
++		if (!buf) {
++			eppic_msg("eppic_filempath error on %s\n", args[optind]);
++			return;
++		}
++		eppic_load(buf);
++		if (eppic_findfile(buf, 0))
++			eppic_unload(buf);
++		eppic_free(buf);
++		optind++;
++	}
++}
++
+ #define NCMDS 200
+ static struct command_table_entry command_table[NCMDS] =  {
+ 
+@@ -797,6 +837,7 @@ static struct command_table_entry command_table[NCMDS] =  {
+ 	{"sdebug", sdebug_cmd, sdebug_help},
+ 	{"sname", sname_cmd, sname_help},
+ 	{"sclass", sclass_cmd, sclass_help},
++	{"eppic", eppic_command, eppic_help},
+ 	{(char *)0 }
+ };
+ 
+@@ -885,9 +926,178 @@ char **help=malloc(sizeof *help * 5);
+         }
+     }
+     free(help);
++
++    if (load && !strcmp(name, "main")) {
++        int optind_save = optind;
++        eppic_cmd(name, NULL, 0);
++        optind = optind_save;
++    }
++
+     return;
+ }
+ 
++static ffi_type *check_types(char *type)
++{
++	if (strchr(type, '*'))
++		return &ffi_type_pointer;
++	if (strstr(type, "char"))
++		return &ffi_type_uint8;
++	if (strstr(type, "int"))
++		return &ffi_type_uint;
++	if (strstr(type, "long"))
++		return &ffi_type_ulong;
++	fprintf(stderr, "ffi_type: unknown type: %s\n", type);
++		return NULL;
++}
++
++/* Only allow crash's function to be called by eppic due to security concerns */
++static int is_crash_func(void *func)
++{
++	char exe_path[1024] = {0};
++	char line[1024] = {0};
++	char perms[5] = {0};
++	char buf[1024] = {0};
++	unsigned long start, end;
++
++	int len = readlink("/proc/self/exe", exe_path, sizeof(exe_path));
++	if (len < 0 || len >= sizeof(exe_path)) {
++		fprintf(stderr, "Readlink /proc/self/exe fail\n");
++		return 0;
++	}
++	FILE *fp = fopen("/proc/self/maps", "r");
++	if (!fp) {
++		fprintf(stderr, "Fopen /proc/self/maps fail\n");
++		return 0;
++	}
++
++	while (fgets(line, sizeof(line), fp)) {
++		len = sscanf(line, "%lx-%lx %4s %s %s %s %s",
++			&start, &end, perms, buf, buf, buf, buf);
++		if (len == 7 && strstr(perms, "r-x") && !strcmp(buf, exe_path)) {
++			if ((unsigned long)func >= start && (unsigned long)func <= end) {
++				fclose(fp);
++				return 1;
++			}
++		}
++	}
++	fclose(fp);
++	return 0;
++}
++
++static value_t*
++call_crash_func(value_t *func_name, value_t *arg_nums, ...)
++{
++    va_list ap;
++    value_t *vals[BT_MAXARGS];
++    ffi_type* func_args_types[BT_MAXARGS];
++    void* func_args_vals_addrs[BT_MAXARGS];
++    ull func_args_vals[BT_MAXARGS];
++    ffi_arg result;
++
++    int i, nums;
++    char *f_name = eppic_getptr(func_name, char);
++    void *handle = dlopen(NULL, RTLD_LAZY);
++
++    if (!handle) {
++        fprintf(stderr, "dlopen error");
++	goto out;
++    }
++
++    void *func_ptr = dlsym(handle, f_name);
++    if (!func_ptr || !is_crash_func(func_ptr)) {
++	fprintf(stderr, "function %s not find in crash!\n", f_name);
++	goto out;
++    }
++    nums = (int)eppic_getval(arg_nums);
++    va_start(ap, arg_nums);
++    for (i = 0; i < BT_MAXARGS && i < (nums * 2); i++) {
++	vals[i] = va_arg(ap, value_t *);
++    }
++    va_end(ap);
++
++    ffi_cif cif_func;
++
++    for (i = 0; i < nums; i++) {
++        func_args_types[i] = check_types(eppic_getptr(vals[i * 2], char));
++	if (!func_args_types[i])
++		goto out;
++	func_args_vals[i] = eppic_getval(vals[i * 2 + 1]);
++	func_args_vals_addrs[i] = &func_args_vals[i];
++    }
++
++    if (ffi_prep_cif(&cif_func, FFI_DEFAULT_ABI,
++                nums, &ffi_type_pointer, func_args_types)) {
++	fprintf(stderr, "ffi_prep failed for %s\n", f_name);
++        goto out;
++    }
++
++    ffi_call(&cif_func, FFI_FN(func_ptr), &result, func_args_vals_addrs);
++
++    return eppic_makebtype(result);
++out:
++    return eppic_makebtype(0);
++}
++
++value_t*
++kern2_crash_memcpy(value_t *kv, value_t *cv, value_t *count)
++{
++    ull kaddr= eppic_getval(kv);
++    char *caddr = (char *)eppic_getval(cv);
++    ull c = eppic_getval(count);
++
++    API_GETMEM(kaddr, caddr, c);
++    return eppic_makebtype(c);
++}
++
++value_t*
++set_crash_mem(value_t *addr, value_t *v, value_t *si)
++{
++    char *crash_addr = eppic_getptr(addr, char);
++    int size = (int)eppic_getval(si);
++    ull value = eppic_getval(v);
++
++    switch (size)
++    {
++    case 8:
++	*(ull *)crash_addr = value;
++	return eppic_makebtype(8);
++    case 4:
++	*(ul *)crash_addr = (ul)value;
++	return eppic_makebtype(4);
++    case 2:
++	*(short *)crash_addr = (short)value;
++	return eppic_makebtype(2);
++    case 1:
++	*(char *)crash_addr = (char)value;
++	return eppic_makebtype(1);
++    default:
++	eppic_error("Invalid get_crash_mem size: %d\n", size);
++    }
++    __builtin_unreachable();
++}
++
++value_t*
++get_crash_mem(value_t *addr, value_t *si)
++{
++    char *crash_addr = eppic_getptr(addr, char);
++    int size = (int)eppic_getval(si);
++
++    switch (size)
++    {
++    case 8:
++	return eppic_defbtypesize(eppic_newval(), *(ull *)crash_addr, B_ULL);
++    case 4:
++	return eppic_defbtypesize(eppic_newval(), *(ul *)crash_addr, B_UL);
++    case 2:
++	return eppic_defbtypesize(eppic_newval(), *(short *)crash_addr, B_US);
++    case 1:
++	return eppic_defbtypesize(eppic_newval(), *(char *)crash_addr, B_UC);
++    default:
++	eppic_error("Invalid get_crash_mem size: %d\n", size);
++    }
++    __builtin_unreachable();
++}
++
+ /* 
+  *  The _fini() function is called if the shared object is unloaded. 
+  *  If desired, perform any cleanups here. 
+@@ -1040,7 +1250,11 @@ eppic_init(void) /* Register the command set. */
+                 
+                 /* some builtins */
+         	eppic_builtin("unsigned long curtask()", curtask);
+-                
++		eppic_builtin("unsigned long call_crash_func(string, int, ...)",  (bf_t *)call_crash_func);
++		eppic_builtin("unsigned long get_crash_mem(void *, int)",  (bf_t *)get_crash_mem);
++		eppic_builtin("unsigned long set_crash_mem(void *, unsigned long, int)",  (bf_t *)set_crash_mem);
++		eppic_builtin("unsigned long kern2_crash_memcpy(void *, void *, int)",  (bf_t *)kern2_crash_memcpy);
++
+                 fprintf(fp, "Done.\n");
+ 	} 
+ }
+--- libeppic/eppic.h
++++ libeppic/eppic.h
+@@ -398,6 +398,7 @@ value_t *eppic_findsym(value_t *vadr);
+ value_t *eppic_memdebugon(void);
+ value_t *eppic_memdebugoff(void);
+ value_t *eppic_ismember(value_t*vp, value_t*vm);
++value_t *eppic_offsetof(value_t*vp, value_t*vm);
+ 
+ value_t *eppic_prarr(value_t*name, value_t*root);
+ value_t *eppic_getstr(value_t*vm);
+--- libeppic/eppic_api.c
++++ libeppic/eppic_api.c
+@@ -506,6 +506,20 @@ stinfo_t*st;
+     return eppic_defbtype(eppic_newval(), ret);
+ }
+ 
++value_t *
++eppic_offsetof(value_t*vp, value_t*vm)
++{
++char *name=eppic_getptr(vm, char);
++int ret=-1;
++stinfo_t*st;
++stmember_t*stm;
++
++    stm=eppic_getm(name, &vp->type, &st);
++    if(stm) ret=stm->m.offset;
++
++    return eppic_defbtype(eppic_newval(), ret);
++}
++
+ /* XXX this entire stuff could very well be machine specific ... */
+ static int
+ eppic_getalign(type_t*t)
+--- libeppic/eppic_api.h
++++ libeppic/eppic_api.h
+@@ -16,6 +16,9 @@
+ /* minor and major version number 
+     4.0 switch to new Eppic name and use of fully typed symbols.
+ */
++#ifndef EPPIC_API_H
++#define EPPIC_API_H
++
+ #define S_MAJOR 5
+ #define S_MINOR 0
+ 
+@@ -298,3 +301,5 @@ void eppic_dbg_named(int class, char *name, int level, char *, ...);
+ 
+ /* parsers debug flags */
+ extern int eppicdebug, eppicppdebug;
++
++#endif
+\ No newline at end of file
+--- libeppic/eppic_builtin.c
++++ libeppic/eppic_builtin.c
+@@ -342,6 +342,7 @@ static btspec_t eppicbfuncs[] = {
+     { "void prarr(string name, int i)",     bcast(eppic_prarr)},
+     { "int member(void*, string name)",     bcast(eppic_ismember)},
+     { "string findsym(string)",             bcast(eppic_findsym)},
++    { "int offsetof(void*, string name)",   bcast(eppic_offsetof)},
+ };
+ 
+ 
+--- libeppic/eppic_func.c
++++ libeppic/eppic_func.c
+@@ -22,6 +22,8 @@
+ #include <sys/types.h>
+ #include <time.h>
+ #include <sys/stat.h>
++#include <fcntl.h>
++#include <unistd.h>
+ #include "eppic.h"
+ 
+ /*
+@@ -793,6 +795,73 @@ char *ed=getenv("EDITOR");
+     if(!system(buf)) eppic_load(fname);
+ }
+ 
++static const char *example[] = {
++"/*										",
++" * Example: Print PID 1's all VMA using crash's maple_tree functions.					",
++" *										",
++" * // Kernel's global variables and data structures can be used directly without",
++" * // pre-define it in kernel header. If any are within kernel modules, should	",
++" * // preload the .ko first via \"mod -S/-s\" cmd in crash before invoke your	",
++" * // eppic program.								",
++" * //										",
++" * // Eppic program's syntax is similar to C but with slight differences.	",
++" * // Code samples:								",
++" * // https://github.com/lucchouina/eppic/tree/master/applications/crash/code	",
++" * // Available eppic functions:	",
++" * // https://github.com/lucchouina/eppic/blob/master/libeppic/eppic_builtin.c#L316",
++" *										",
++" * int main()									",
++" * {										",
++" * 	struct task_struct *p;							",
++" * 	unsigned long mm_offset;						",
++" * 	unsigned long task_offset;						",
++" * 	struct maple_tree *mt;							",
++" * 	unsigned long count;							",
++" * 	char *crash_buf;							",
++" * 	int i;									",
++" * 	struct list_pair {							",
++" * 		unsigned long index;						",
++" * 		void *value;							",
++" * 	};									",
++" * 										",
++" * 	p = (struct task_struct *)&init_task;					",
++" * 	mm_offset = (unsigned long)&(p->mm) - (unsigned long)p;			",
++" * 	task_offset = (unsigned long)&(p->tasks) - (unsigned long)p;		",
++" * 										",
++" * 	do {									",
++" * 		if ((int)(p->pid) == 1)						",
++" * 			break;							",
++" * 		p = (struct task_struct *)((unsigned long)(p->tasks.next) - task_offset);",
++" * 	} while (p != &init_task);						",
++" * 										",
++" * 	count = call_crash_func(\"do_maple_tree\", 3, \"long\",			",
++" *		(unsigned long)&(p->mm->mm_mt), \"int\", 1, \"char *\", 0);     ",
++" * 										",
++" * 	crash_buf = (char *)call_crash_func(\"getbuf\", 1, \"long\", count * sizeof(struct list_pair));",
++" * 										",
++" * 	if (crash_buf == NULL) {						",
++" * 		printf(\"getbuf error\\n\");					",
++" * 		return 0;							",
++" * 	}									",
++" * 										",
++" * 	call_crash_func(\"do_maple_tree\", 3, \"long\",				",
++" *		(unsigned long)&(p->mm->mm_mt), \"int\", 4, \"char *\", crash_buf);",
++" *										",
++" * 	for (i = 0; i < count; i++) {						",
++" * 		printf(\"vma: %llx\\n\", (unsigned long long)get_crash_mem(	",
++" *			crash_buf + i * sizeof(struct list_pair) + 8, 8));	",
++" * 	}									",
++" * 										",
++" * 	call_crash_func(\"freebuf\", 1, \"char *\", crash_buf);			",
++" * 										",
++" * 	return 0;								",
++" * }										",
++" *										",
++" * crash> eppic program_file.c							",
++" */										",
++};
++
++char *eppic_get_func_file(char *);
+ /*
+     This funciton is called to start a vi session on a function
+     (file=0) or a file (file=1);
+@@ -800,24 +869,31 @@ char *ed=getenv("EDITOR");
+ void
+ eppic_vi(char *fname, int file)
+ {
+-int line, freeit=0;
++int line=1, freeit=0, fd;
+ char *filename;
++char newline = '\n';
+ 
+     if(file) {
+ 
+         filename=eppic_filempath(fname);
+ 
+         if(!filename) {
+-
+-            eppic_msg("File not found : %s\n", fname);
+-            return;
+-
+-        }
+-
+-        line=1;
+-        freeit=1;
+-
+-
++	    fd = creat(fname, 0644);
++	    if (fd < 0) {
++		eppic_msg("File not found : %s\n", fname);
++		return;
++	    } else {
++		for (int i = 0; i < sizeof(example)/sizeof(char *); i++) {
++			write(fd, example[i], strlen(example[i]));
++			write(fd, &newline, sizeof(newline));
++		}
++		close(fd);
++		filename = fname;
++		freeit=0;
++	    }
++        } else {
++            freeit=1;
++	}
+     } else {
+ 
+         func *f=eppic_getfbyname(fname, 0);
+@@ -837,6 +913,10 @@ char *filename;
+ 
+     eppic_exevi(filename, line);
+ 
++    char *fi_name = eppic_get_func_file("main");
++    if (fi_name)
++        eppic_deletefile(fi_name);
++
+     if(freeit) eppic_free(filename);
+ 
+ }
+@@ -1184,3 +1264,10 @@ eppic_runcmd(char *fname, var_t*args)
+     return 0;
+ }
+ 
++char *eppic_get_func_file(char *funcname)
++{
++	func *fn = eppic_getfbyname(funcname, 0);
++	if (!fn)
++		return NULL;
++	return fn->file->fname;
++}
