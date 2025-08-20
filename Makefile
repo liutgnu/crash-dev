@@ -298,6 +298,9 @@ endif
 ifeq ($(findstring valgrind,$(MAKECMDGOALS)),valgrind)
 CONF_TARGET_FLAG += -x valgrind
 endif
+ifeq ($(findstring eppic,$(MAKECMDGOALS)),eppic)
+CONF_TARGET_FLAG += -x eppic
+endif
 
 # To build the extensions library by default, uncomment the third command
 # line below.  Otherwise they can be built by entering "make extensions".

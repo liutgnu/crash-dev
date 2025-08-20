@@ -1863,6 +1863,9 @@ get_extra_flags(char *filename, char *initial)
  *
  *  For valgrind:
  *    - enter -DVALGRIND in the CFLAGS.extra file
+ *
+ *  For eppic:
+ *    - enter -DEPPIC in the CFLAGS.extra file
  */
 void
 add_extra_lib(char *option)
@@ -1871,6 +1874,7 @@ add_extra_lib(char *option)
 	int snappy, add_DSNAPPY, add_lsnappy;
 	int zstd, add_DZSTD, add_lzstd;
 	int valgrind, add_DVALGRIND;
+	int add_DEPPIC;
 	char *cflags, *ldflags;
 	FILE *fp_cflags, *fp_ldflags;
 	char *mode;
@@ -1880,6 +1884,7 @@ add_extra_lib(char *option)
 	snappy = add_DSNAPPY = add_lsnappy = 0;
 	zstd = add_DZSTD = add_lzstd = 0;
 	valgrind = add_DVALGRIND = 0;
+	add_DEPPIC = 0;
 
 	ldflags = get_extra_flags("LDFLAGS.extra", NULL);
 	cflags = get_extra_flags("CFLAGS.extra", NULL);
@@ -1914,6 +1919,11 @@ add_extra_lib(char *option)
 			add_DVALGRIND++;
 	}
 
+	if (strcmp(option, "eppic") == 0) {
+		if (!cflags || !strstr(cflags, "-DEPPIC"))
+			add_DEPPIC++;
+	}
+
 	if ((lzo || snappy || zstd) &&
 	    file_exists("diskdump.o") && (unlink("diskdump.o") < 0)) {
 		perror("diskdump.o");
@@ -1939,7 +1949,7 @@ add_extra_lib(char *option)
 		return;
 	}
 
-	if (add_DLZO || add_DSNAPPY || add_DZSTD || add_DVALGRIND) {
+	if (add_DLZO || add_DSNAPPY || add_DZSTD || add_DVALGRIND || add_DEPPIC) {
 		while (fgets(inbuf, 512, fp_cflags))
 			;
 		if (add_DLZO)
@@ -1950,6 +1960,8 @@ add_extra_lib(char *option)
 			fputs("-DZSTD\n", fp_cflags);
 		if (add_DVALGRIND)
 			fputs("-DVALGRIND\n", fp_cflags);
+		if (add_DEPPIC)
+			fputs("-DEPPIC\n", fp_cflags);
 	}
 
 	if (add_llzo2 || add_lsnappy || add_lzstd) {

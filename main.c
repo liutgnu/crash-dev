@@ -821,6 +821,10 @@ main_loop(void)
 
 	if (pc->flags & PRELOAD_EXTENSIONS)
 		preload_extensions(NULL);
+#ifdef EPPIC
+	else
+		preload_extensions("eppic.so");
+#endif
 
 	/*
 	 *  Return here if a non-recoverable error occurs
