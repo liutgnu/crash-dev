@@ -305,6 +305,9 @@ endif
 all: make_configure
 	@./configure ${CONF_TARGET_FLAG} -p "RPMPKG=${RPMPKG}" -b
 	@$(MAKE) gdb_merge
+	@if printf '%s\n' ${CONF_TARGET_FLAG} | grep -q eppic; then \
+		$(MAKE) eppic_so; \
+	fi;
 #	@$(MAKE) extensions
 
 gdb_merge: force
@@ -381,7 +384,7 @@ install:
 unconfig: make_configure
 	@./configure -u
 
-warn Warn nowarn lzo snappy zstd valgrind: all
+warn Warn nowarn lzo snappy zstd valgrind eppic: all
 	@true  #dummy
 
 main.o: ${GENERIC_HFILES} main.c
@@ -722,9 +725,9 @@ name:
 dis:
 	objdump --disassemble --line-numbers ${PROGRAM} > ${PROGRAM}.dis
 
-extensions: make_configure
+extensions eppic_so: make_configure
 	@./configure ${CONF_TARGET_FLAG} -q -b
-	@$(MAKE) do_extensions
+	@$(MAKE) $(if $(filter $@,eppic_so),CONTRIB_SO=eppic.so) do_extensions
 
 do_extensions:
 	@$(MAKE) -C extensions -i TARGET=$(TARGET) TARGET_CFLAGS="$(CFLAGS) $(TARGET_CFLAGS)" GDB=$(GDB) GDB_FLAGS=$(GDB_FLAGS)

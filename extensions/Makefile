@@ -24,7 +24,7 @@
 # and that makefile will be invoked. 
 # 
 
-CONTRIB_SO := $(patsubst %.c,%.so,$(wildcard *.c))
+CONTRIB_SO ?= $(patsubst %.c,%.so,$(wildcard *.c))
 
 all: link_defs $(CONTRIB_SO)
 	
