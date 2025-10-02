@@ -1,4 +1,5 @@
-
+## Eppic Demo ##
+![eppic_demo](eppic_demo.gif)
 
                          CORE ANALYSIS SUITE
 
