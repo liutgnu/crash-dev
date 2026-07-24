@@ -3806,6 +3806,8 @@ typedef signed int s32;
 #define VM_L5_1G	(0x200)
 #define IRQ_STACKS	(0x400)
 #define OVERFLOW_STACKS     (0x800)
+#define RISCV64_PTE_LEAF(pte) \
+	((pte) & (_PAGE_READ | _PAGE_WRITE | _PAGE_EXEC))
 
 #define RISCV64_OVERFLOW_STACK_SIZE (1 << 12)
 

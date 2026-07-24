@@ -19,12 +19,8 @@
 #include <math.h>
 
 static ulong riscv64_get_page_size(void);
-static int riscv64_vtop_3level_4k(ulong *pgd, ulong vaddr,
-				   physaddr_t *paddr, int verbose);
-static int riscv64_vtop_4level_4k(ulong *pgd, ulong vaddr,
-				   physaddr_t *paddr, int verbose);
-static int riscv64_vtop_5level_4k(ulong *pgd, ulong vaddr,
-				   physaddr_t *paddr, int verbose);
+static int riscv64_vtop_nlevel_4k(ulong *pgd, ulong vaddr,
+				   physaddr_t *paddr, int verbose, int levels);
 static void riscv64_page_type_init(void);
 static int riscv64_is_kvaddr(ulong vaddr);
 static int riscv64_is_uvaddr(ulong vaddr, struct task_context *tc);
@@ -637,66 +633,208 @@ riscv64_page_type_init(void)
 	}
 }
 
-static int
-riscv64_vtop_3level_4k(ulong *pgd, ulong vaddr, physaddr_t *paddr, int verbose)
+static ulong
+riscv64_vtop_index(ulong vaddr, int levels, int level)
 {
-	ulong *pgd_ptr, pgd_val;
-	ulong pmd_base, pmd_addr, pmd_val;
-	ulong pte_base, pte_addr, pte_val, pte_pfn;
+	switch (levels) {
+	case 3:
+		switch (level) {
+		case 2:
+			return pgd_index_l3_4k(vaddr);
+		case 1:
+			return pmd_index_l3_4k(vaddr);
+		case 0:
+			return pte_index_l3_4k(vaddr);
+		}
+		break;
+
+	case 4:
+		switch (level) {
+		case 3:
+			return pgd_index_l4_4k(vaddr);
+		case 2:
+			return pud_index_l4_4k(vaddr);
+		case 1:
+			return pmd_index_l4_4k(vaddr);
+		case 0:
+			return pte_index_l4_4k(vaddr);
+		}
+		break;
+
+	case 5:
+		switch (level) {
+		case 4:
+			return pgd_index_l5_4k(vaddr);
+		case 3:
+			return p4d_index_l5_4k(vaddr);
+		case 2:
+			return pud_index_l5_4k(vaddr);
+		case 1:
+			return pmd_index_l5_4k(vaddr);
+		case 0:
+			return pte_index_l5_4k(vaddr);
+		}
+		break;
+	}
+
+	return 0;
+}
+
+static const char *
+riscv64_level_name(int levels, int level)
+{
+	if (level == levels - 1)
+		return "PGD";
+
+	if (level == 3)
+		return "P4D";
+
+	if (level == 2)
+		return "PUD";
+
+	if (level == 1)
+		return "PMD";
+
+	return "PTE";
+}
+
+static int
+riscv64_pte_page_shift(int level)
+{
+	switch (level) {
+	case 0:
+		return PAGESHIFT();
+	case 1:
+		return PMD_SHIFT;
+	case 2:
+		return PUD_SHIFT;
+	case 3:
+		return P4D_SHIFT;
+	case 4:
+		return PGD_SHIFT_L5;
+	default:
+		return PAGESHIFT();
+	}
+}
+
+static physaddr_t
+riscv64_pte_page_mask(int level)
+{
+	return ((physaddr_t)1 << riscv64_pte_page_shift(level)) - 1;
+}
+
+static physaddr_t
+riscv64_pte_paddr_base(ulong pte)
+{
+	pte &= PTE_PFN_PROT_MASK;
+	return PTOB(pte >> _PAGE_PFN_SHIFT);
+}
+
+static physaddr_t
+riscv64_pte_to_paddr(ulong pte, ulong vaddr, int level)
+{
+	physaddr_t base, mask;
+
+	base = riscv64_pte_paddr_base(pte);
+	mask = riscv64_pte_page_mask(level);
+
+	return base + (vaddr & mask);
+}
+
+static int
+riscv64_vtop_nlevel_4k(ulong *pgd, ulong vaddr, physaddr_t *paddr,
+		       int verbose, int levels)
+{
+	int level;
+	ulong index;
+	ulong entry_addr;
+	ulong pte;
+	ulong table_addr;
+	const char *name;
+
+	if (levels < 3 || levels > 5)
+		return FALSE;
+
+	*paddr = 0;
 
 	if (verbose)
 		fprintf(fp, "PAGE DIRECTORY: %lx\n", (ulong)pgd);
 
-	/* PGD */
-	pgd_ptr = pgd + pgd_index_l3_4k(vaddr);
-	FILL_PGD(pgd, KVADDR, PAGESIZE());
-	pgd_val = ULONG(machdep->pgd + PAGEOFFSET(pgd_ptr));
-	if (verbose)
-		fprintf(fp, "  PGD: %lx => %lx\n", (ulong)pgd_ptr, pgd_val);
-	if (!pgd_val)
-		goto no_page;
-	pgd_val &= PTE_PFN_PROT_MASK;
-	pmd_base = (pgd_val >> _PAGE_PFN_SHIFT) << PAGESHIFT();
+	table_addr = (ulong)pgd;
 
-	/* PMD */
-	FILL_PMD(PAGEBASE(pmd_base), PHYSADDR, PAGESIZE());
-	pmd_addr = pmd_base + sizeof(pmd_t) * pmd_index_l3_4k(vaddr);
-	pmd_val = ULONG(machdep->pmd + PAGEOFFSET(pmd_addr));
-	if (verbose)
-		fprintf(fp, "  PMD: %016lx => %016lx\n", pmd_addr, pmd_val);
-	if (!pmd_val)
-		goto no_page;
-	pmd_val &= PTE_PFN_PROT_MASK;
-	pte_base = (pmd_val >> _PAGE_PFN_SHIFT) << PAGESHIFT();
+	for (level = levels - 1; level >= 0; level--) {
+		name = riscv64_level_name(levels, level);
+		index = riscv64_vtop_index(vaddr, levels, level);
 
-	/* PTE */
-	FILL_PTBL(PAGEBASE(pte_base), PHYSADDR, PAGESIZE());
-	pte_addr = pte_base + sizeof(pmd_t) * pte_index_l3_4k(vaddr);
-	pte_val = ULONG(machdep->ptbl + PAGEOFFSET(pte_addr));
-	if (verbose)
-		fprintf(fp, "  PTE: %lx => %lx\n", pte_addr, pte_val);
-	if (!pte_val)
-		goto no_page;
-	pte_val &= PTE_PFN_PROT_MASK;
-	pte_pfn = pte_val >> _PAGE_PFN_SHIFT;
+		if (level == levels - 1) {
+			FILL_PGD((ulong *)PAGEBASE(table_addr), KVADDR,
+				 PAGESIZE());
 
-	if (!(pte_val & _PAGE_PRESENT)) {
-		if (verbose) {
-			fprintf(fp, "\n");
-			riscv64_translate_pte((ulong)pte_val, 0, 0);
-			fprintf(fp, " PAGE: %016lx not present\n\n", PAGEBASE(*paddr));
+			entry_addr = table_addr + sizeof(ulong) * index;
+			pte = ULONG(machdep->pgd + PAGEOFFSET(entry_addr));
+		 } else {
+			FILL_PTBL(PAGEBASE(table_addr), PHYSADDR,
+				  PAGESIZE());
+
+			entry_addr = table_addr + sizeof(ulong) * index;
+			pte = ULONG(machdep->ptbl + PAGEOFFSET(entry_addr));
 		}
-		return FALSE;
+
+		if (verbose)
+			fprintf(fp, "  %s: %016lx => %016lx\n",
+				name, entry_addr, pte);
+
+		if (!pte)
+			goto no_page;
+
+		pte &= PTE_PFN_PROT_MASK;
+
+		if (!(pte & _PAGE_PRESENT)) {
+			if (verbose) {
+				fprintf(fp, "\n");
+				riscv64_translate_pte(pte, 0, 0);
+			}
+
+			fprintf(fp, " PAGE: %016lx not present\n\n",
+				PAGEBASE(vaddr));
+			return FALSE;
+		}
+
+		if (RISCV64_PTE_LEAF(pte)) {
+			physaddr_t base, mask;
+
+			base = riscv64_pte_paddr_base(pte);
+			mask = riscv64_pte_page_mask(level);
+
+			if (level && (base & mask)) {
+				if (verbose) {
+					fprintf(fp, "\n");
+					riscv64_translate_pte(pte, 0, 0);
+				}
+
+				fprintf(fp,
+				    " PAGE: %016lx invalid misaligned leaf pte\n\n",
+				    PAGEBASE(vaddr));
+				return FALSE;
+			}
+
+			*paddr = riscv64_pte_to_paddr(pte, vaddr, level);
+
+			if (verbose) {
+				fprintf(fp, " PAGE: %016lx\n\n",
+					(ulong)(*paddr & ~mask));
+				riscv64_translate_pte(pte, 0, 0);
+			}
+
+			return TRUE;
+		}
+
+		if (level == 0)
+			goto no_page;
+
+		table_addr = (ulong)riscv64_pte_paddr_base(pte);
 	}
 
-	*paddr = PTOB(pte_pfn) + PAGEOFFSET(vaddr);
-
-	if (verbose) {
-		fprintf(fp, " PAGE: %016lx\n\n", PAGEBASE(*paddr));
-		riscv64_translate_pte(pte_val, 0, 0);
-	}
-
-	return TRUE;
 no_page:
 	if (verbose)
 		fprintf(fp, "invalid for %lx address\n", vaddr);
@@ -1219,174 +1357,6 @@ riscv64_get_frame(struct bt_info *bt, ulong *pcp, ulong *spp)
 }
 
 static int
-riscv64_vtop_4level_4k(ulong *pgd, ulong vaddr, physaddr_t *paddr, int verbose)
-{
-	ulong *pgd_ptr, pgd_val;
-	ulong pud_base, pud_addr, pud_val;
-	ulong pmd_base, pmd_addr, pmd_val;
-	ulong pte_base, pte_addr, pte_val, pte_pfn;
-
-	if (verbose)
-		fprintf(fp, "PAGE DIRECTORY: %lx\n", (ulong)pgd);
-
-	/* PGD */
-	pgd_ptr = pgd + pgd_index_l4_4k(vaddr);
-	FILL_PGD(pgd, KVADDR, PAGESIZE());
-	pgd_val = ULONG(machdep->pgd + PAGEOFFSET(pgd_ptr));
-	if (verbose)
-		fprintf(fp, "  PGD: %lx => %lx\n", (ulong)pgd_ptr, pgd_val);
-	if (!pgd_val)
-		goto no_page;
-	pgd_val &= PTE_PFN_PROT_MASK;
-	pud_base = (pgd_val >> _PAGE_PFN_SHIFT) << PAGESHIFT();
-
-	/* PUD */
-	FILL_PUD(PAGEBASE(pud_base), PHYSADDR, PAGESIZE());
-	pud_addr = pud_base + sizeof(pud_t) * pud_index_l4_4k(vaddr);
-	pud_val = ULONG(machdep->pud + PAGEOFFSET(pud_addr));
-	if (verbose)
-		fprintf(fp, "  PUD: %016lx => %016lx\n", pud_addr, pud_val);
-	if (!pud_val)
-		goto no_page;
-	pud_val &= PTE_PFN_PROT_MASK;
-	pmd_base = (pud_val >> _PAGE_PFN_SHIFT) << PAGESHIFT();
-
-	/* PMD */
-	FILL_PMD(PAGEBASE(pmd_base), PHYSADDR, PAGESIZE());
-	pmd_addr = pmd_base + sizeof(pmd_t) * pmd_index_l4_4k(vaddr);
-	pmd_val = ULONG(machdep->pmd + PAGEOFFSET(pmd_addr));
-	if (verbose)
-		fprintf(fp, "  PMD: %016lx => %016lx\n", pmd_addr, pmd_val);
-	if (!pmd_val)
-		goto no_page;
-	pmd_val &= PTE_PFN_PROT_MASK;
-	pte_base = (pmd_val >> _PAGE_PFN_SHIFT) << PAGESHIFT();
-
-	/* PTE */
-	FILL_PTBL(PAGEBASE(pte_base), PHYSADDR, PAGESIZE());
-	pte_addr = pte_base + sizeof(pte_t) * pte_index_l4_4k(vaddr);
-	pte_val = ULONG(machdep->ptbl + PAGEOFFSET(pte_addr));
-	if (verbose)
-		fprintf(fp, "  PTE: %lx => %lx\n", pte_addr, pte_val);
-	if (!pte_val)
-		goto no_page;
-	pte_val &= PTE_PFN_PROT_MASK;
-	pte_pfn = pte_val >> _PAGE_PFN_SHIFT;
-
-	if (!(pte_val & _PAGE_PRESENT)) {
-		if (verbose) {
-			fprintf(fp, "\n");
-			riscv64_translate_pte((ulong)pte_val, 0, 0);
-			fprintf(fp, " PAGE: %016lx not present\n\n", PAGEBASE(*paddr));
-		}
-		return FALSE;
-	}
-
-	*paddr = PTOB(pte_pfn) + PAGEOFFSET(vaddr);
-
-	if (verbose) {
-		fprintf(fp, " PAGE: %016lx\n\n", PAGEBASE(*paddr));
-		riscv64_translate_pte(pte_val, 0, 0);
-	}
-
-	return TRUE;
-no_page:
-	if (verbose)
-		fprintf(fp, "invalid for %lx address\n", vaddr);
-	return FALSE;
-}
-
-static int
-riscv64_vtop_5level_4k(ulong *pgd, ulong vaddr, physaddr_t *paddr, int verbose)
-{
-	ulong *pgd_ptr, pgd_val;
-	ulong p4d_base, p4d_addr, p4d_val;
-	ulong pud_base, pud_addr, pud_val;
-	ulong pmd_base, pmd_addr, pmd_val;
-	ulong pte_base, pte_addr, pte_val, pte_pfn;
-
-	if (verbose)
-		fprintf(fp, "PAGE DIRECTORY: %lx\n", (ulong)pgd);
-
-	/* PGD */
-	pgd_ptr = pgd + pgd_index_l5_4k(vaddr);
-	FILL_PGD(pgd, KVADDR, PAGESIZE());
-	pgd_val = ULONG(machdep->pgd + PAGEOFFSET(pgd_ptr));
-	if (verbose)
-		fprintf(fp, "  PGD: %lx => %lx\n", (ulong)pgd_ptr, pgd_val);
-	if (!pgd_val)
-		goto no_page;
-	pgd_val &= PTE_PFN_PROT_MASK;
-	p4d_base = (pgd_val >> _PAGE_PFN_SHIFT) << PAGESHIFT();
-
-	/* P4D */
-	FILL_P4D(PAGEBASE(p4d_base), PHYSADDR, PAGESIZE());
-	p4d_addr = p4d_base + sizeof(p4d_t) * p4d_index_l5_4k(vaddr);
-	p4d_val = ULONG(machdep->machspec->p4d + PAGEOFFSET(p4d_addr));
-	if (verbose)
-		fprintf(fp, "  P4D: %016lx => %016lx\n", p4d_addr, p4d_val);
-	if (!p4d_val)
-		goto no_page;
-	p4d_val &= PTE_PFN_PROT_MASK;
-	pud_base = (p4d_val >> _PAGE_PFN_SHIFT) << PAGESHIFT();
-
-	/* PUD */
-	FILL_PUD(PAGEBASE(pud_base), PHYSADDR, PAGESIZE());
-	pud_addr = pud_base + sizeof(pud_t) * pud_index_l5_4k(vaddr);
-	pud_val = ULONG(machdep->pud + PAGEOFFSET(pud_addr));
-	if (verbose)
-		fprintf(fp, "  PUD: %016lx => %016lx\n", pud_addr, pud_val);
-	if (!pud_val)
-		goto no_page;
-	pud_val &= PTE_PFN_PROT_MASK;
-	pmd_base = (pud_val >> _PAGE_PFN_SHIFT) << PAGESHIFT();
-
-	/* PMD */
-	FILL_PMD(PAGEBASE(pmd_base), PHYSADDR, PAGESIZE());
-	pmd_addr = pmd_base + sizeof(pmd_t) * pmd_index_l5_4k(vaddr);
-	pmd_val = ULONG(machdep->pmd + PAGEOFFSET(pmd_addr));
-	if (verbose)
-		fprintf(fp, "  PMD: %016lx => %016lx\n", pmd_addr, pmd_val);
-	if (!pmd_val)
-		goto no_page;
-	pmd_val &= PTE_PFN_PROT_MASK;
-	pte_base = (pmd_val >> _PAGE_PFN_SHIFT) << PAGESHIFT();
-
-	/* PTE */
-	FILL_PTBL(PAGEBASE(pte_base), PHYSADDR, PAGESIZE());
-	pte_addr = pte_base + sizeof(pte_t) * pte_index_l5_4k(vaddr);
-	pte_val = ULONG(machdep->ptbl + PAGEOFFSET(pte_addr));
-	if (verbose)
-		fprintf(fp, "  PTE: %lx => %lx\n", pte_base, pte_val);
-	if (!pte_val)
-		goto no_page;
-	pte_val &= PTE_PFN_PROT_MASK;
-	pte_pfn = pte_val >> _PAGE_PFN_SHIFT;
-
-	if (!(pte_val & _PAGE_PRESENT)) {
-		if (verbose) {
-			fprintf(fp, "\n");
-			riscv64_translate_pte((ulong)pte_val, 0, 0);
-			fprintf(fp, " PAGE: %016lx not present\n\n", PAGEBASE(*paddr));
-		}
-		return FALSE;
-	}
-
-	*paddr = PTOB(pte_pfn) + PAGEOFFSET(vaddr);
-
-	if (verbose) {
-		fprintf(fp, " PAGE: %016lx\n\n", PAGEBASE(*paddr));
-		riscv64_translate_pte(pte_val, 0, 0);
-	}
-
-	return TRUE;
-no_page:
-	if (verbose)
-		fprintf(fp, "invalid for %lx address\n", vaddr);
-	return FALSE;
-}
-
-static int
 riscv64_init_active_task_regs(void)
 {
 	int retval;
@@ -1610,11 +1580,11 @@ riscv64_uvtop(struct task_context *tc, ulong uvaddr, physaddr_t *paddr, int verb
 	switch (machdep->flags & VM_FLAGS)
 	{
 	case VM_L3_4K:
-		return riscv64_vtop_3level_4k(pgd, uvaddr, paddr, verbose);
+		return riscv64_vtop_nlevel_4k(pgd, uvaddr, paddr, verbose, 3);
 	case VM_L4_4K:
-		return riscv64_vtop_4level_4k(pgd, uvaddr, paddr, verbose);
+		return riscv64_vtop_nlevel_4k(pgd, uvaddr, paddr, verbose, 4);
 	case VM_L5_4K:
-		return riscv64_vtop_5level_4k(pgd, uvaddr, paddr, verbose);
+		return riscv64_vtop_nlevel_4k(pgd, uvaddr, paddr, verbose, 5);
 	default:
 		return FALSE;
 	}
@@ -1669,11 +1639,11 @@ riscv64_kvtop(struct task_context *tc, ulong kvaddr, physaddr_t *paddr, int verb
 	switch (machdep->flags & VM_FLAGS)
 	{
 	case VM_L3_4K:
-		return riscv64_vtop_3level_4k((ulong *)kernel_pgd, kvaddr, paddr, verbose);
+		return riscv64_vtop_nlevel_4k((ulong *)kernel_pgd, kvaddr, paddr, verbose, 3);
 	case VM_L4_4K:
-		return riscv64_vtop_4level_4k((ulong *)kernel_pgd, kvaddr, paddr, verbose);
+		return riscv64_vtop_nlevel_4k((ulong *)kernel_pgd, kvaddr, paddr, verbose, 4);
 	case VM_L5_4K:
-		return riscv64_vtop_5level_4k((ulong *)kernel_pgd, kvaddr, paddr, verbose);
+		return riscv64_vtop_nlevel_4k((ulong *)kernel_pgd, kvaddr, paddr, verbose, 5);
 	default:
 		return FALSE;
 	}
