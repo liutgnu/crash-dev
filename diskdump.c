@@ -338,16 +338,20 @@ process_elf32_notes(void *note_buf, unsigned long size_note)
 	int num = 0;
 	int vmcoredd_num = 0;
 	int qemu_num = 0;
+	unsigned long left;
 
 	for (index = 0; index < size_note; index += len) {
 		nt = note_buf + index;
+		left = size_note - index;
 
-		if (nt->n_type == NT_PRSTATUS) {
+		if (nt->n_type == NT_PRSTATUS && num < NR_CPUS) {
 			dd->nt_prstatus_percpu[num] = nt;
 			num++;
 		}
 		len = sizeof(Elf32_Nhdr);
-		if (STRNEQ((char *)nt + len, "QEMU")) {
+		if ((left >= sizeof(Elf32_Nhdr) + MAX(nt->n_namesz + sizeof(ulong), 4)) &&
+		    STRNEQ((char *)nt + len, "QEMU") &&
+		    qemu_num < NR_CPUS) {
 			ulong *ptr =
 			    (ulong *)((char *)nt + sizeof(Elf32_Nhdr) + nt->n_namesz);
 			dd->nt_qemucs_percpu[qemu_num] =
@@ -395,22 +399,27 @@ process_elf64_notes(void *note_buf, unsigned long size_note)
 	int num = 0;
 	int vmcoredd_num = 0;
 	int qemu_num = 0;
+	unsigned long left;
 
 	for (index = 0; index < size_note; index += len) {
 		nt = note_buf + index;
+		left = size_note - index;
 
-		if (nt->n_type == NT_PRSTATUS) {
+		if (nt->n_type == NT_PRSTATUS && num < NR_CPUS) {
 			dd->nt_prstatus_percpu[num] = nt;
 			num++;
 		}
-		if ((nt->n_type == NT_TASKSTRUCT) && 
+		if ((nt->n_type == NT_TASKSTRUCT) &&
+		    (left >= sizeof(Elf64_Nhdr) + MAX(nt->n_namesz + sizeof(ulong), 4)) &&
 		    (STRNEQ((char *)nt + sizeof(Elf64_Nhdr), "SNAP"))) {
 			pc->flags2 |= (LIVE_DUMP|SNAP);
 			dd->snapshot_task = 
 			    *((ulong *)((char *)nt + sizeof(Elf64_Nhdr) + nt->n_namesz));
 		}
 		len = sizeof(Elf64_Nhdr);
-		if (STRNEQ((char *)nt + len, "QEMU")) {
+		if ((left >= sizeof(Elf64_Nhdr) + MAX(nt->n_namesz + sizeof(ulong), 4)) &&
+		    STRNEQ((char *)nt + len, "QEMU") &&
+		    qemu_num < NR_CPUS) {
 			ulong *ptr =
 			    (ulong *)((char *)nt + sizeof(Elf64_Nhdr) + nt->n_namesz);
 			dd->nt_qemucs_percpu[qemu_num] =
