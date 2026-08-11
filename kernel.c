@@ -12241,3 +12241,69 @@ out:
 	pc->error_fp = error_fp_save;
 }
 #endif
+
+static int *cpu_to_nid_map;
+
+int
+cpu_to_nid(int cpu)
+{
+	if (!cpu_to_nid_map || cpu < 0 || cpu >= kt->cpus)
+		return -1;
+	if (vt->numnodes == 1)
+		return 0;
+	return cpu_to_nid_map[cpu];
+}
+
+static void
+cpu_to_nid_init(void)
+{
+	int i, j;
+	int fd;
+	char buf[64];
+
+	cpu_to_nid_map = malloc(kt->cpus * sizeof(int));
+	if (vt->numnodes == 1)
+		return;
+
+	memset(cpu_to_nid_map, -1, kt->cpus * sizeof(int));
+
+	if (ACTIVE()) {
+		for (i = 0; i < kt->cpus; i++) {
+			for (j = 0; j < vt->numnodes; j++) {
+				memset(buf, 0, sizeof(buf));
+				sprintf(buf, "/sys/devices/system/cpu/cpu%d/node%d", i, j);
+
+				fd = open(buf, O_RDONLY);
+				if (fd > 0) {
+					cpu_to_nid_map[i] = j;
+					close(fd);
+					break;
+				}
+			}
+		}
+	} else {
+		int cpu;
+
+		if (symbol_exists("numa_node")) {
+			ulong base = symbol_value("numa_node");
+
+			for (cpu = 0; cpu < kt->cpus; cpu++) {
+				ulong addr = base + kt->__per_cpu_offset[cpu];
+				int nid;
+
+				if (readmem(addr, KVADDR, &nid, sizeof(int),
+				    "numa_node", RETURN_ON_ERROR|QUIET))
+					cpu_to_nid_map[cpu] = nid;
+			}
+		} else {
+			error(WARNING,
+			    "numa_node symbol not found in vmcore\n");
+		}
+	}
+}
+
+void
+numa_init(void)
+{
+	cpu_to_nid_init();
+}

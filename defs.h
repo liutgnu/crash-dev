@@ -6051,6 +6051,8 @@ ulong do_maple_tree(ulong, int, struct list_pair *);
 void help_init(void);
 void cmd_usage(char *, int);
 void display_version(void);
+int cpu_to_nid(int cpu);
+void numa_init(void);
 void display_help_screen(char *);
 #ifdef ARM
 #define dump_machdep_table(X) arm_dump_machdep_table(X)

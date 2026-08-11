@@ -793,6 +793,7 @@ main_loop(void)
 			kernel_init();
 			machdep_init(POST_GDB);
         		vm_init();
+			numa_init();
 			machdep_init(POST_VM);
         		module_init();
         		help_init();
