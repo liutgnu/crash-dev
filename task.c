@@ -3929,14 +3929,14 @@ show_ps(ulong flag, struct psinfo *psi)
 
 	if (!(flag & ((PS_EXCLUSIVE & ~PS_ACTIVE)|PS_NO_HEADER))) 
 		fprintf(fp, 
-		    "      PID    PPID  CPU %s  ST  %%MEM      VSZ      RSS  COMM\n",
+		    "      PID    PPID  CPU/NUMA %s  ST  %%MEM      VSZ      RSS  COMM\n",
 			flag & PS_KSTACKP ?
 			mkstring(buf, VADDR_PRLEN, CENTER|RJUST, "KSTACKP") :
 			mkstring(buf, VADDR_PRLEN, CENTER, "TASK"));
 
 	if ((flag & PS_POLICY_DATA) && !(flag & PS_NO_HEADER)) {
 		fprintf(fp,
-		    "      PID    PPID  CPU %s  POLICY       PRIO  COMM\n",
+		    "      PID    PPID  CPU/NUMA %s  POLICY       PRIO  COMM\n",
 			flag & PS_KSTACKP ?
 			mkstring(buf, VADDR_PRLEN, CENTER|RJUST, "KSTACKP") :
 			mkstring(buf, VADDR_PRLEN, CENTER, "TASK"));
@@ -5464,8 +5464,7 @@ show_context(struct task_context *tc)
 	if (tt->flags & THREAD_INFO)
 		fprintf(fp, "[THREAD_INFO: %lx]", tc->thread_info);
 	fprintf(fp, "\n");
-	INDENT(indent);
-	fprintf(fp, "    CPU: %s\n", task_cpu(tc->processor, buf, VERBOSE));
+	fprintf(fp, "    CPU/NUMA: %s\n", task_cpu(tc->processor, buf, VERBOSE));
 	INDENT(indent);
 	fprintf(fp, "  STATE: %s ", 
 		task_state_string(tc->task, buf, VERBOSE));
@@ -6180,8 +6179,9 @@ task_mm(ulong task, int fill)
 char *
 task_cpu(int processor, char *buf, int verbose)
 {
+	int nid = cpu_to_nid(processor);
 	if (processor < NR_CPUS)
-		sprintf(buf, "%d", processor);
+		sprintf(buf, "%4d/%-3d", processor, nid);
 	else
 		sprintf(buf, verbose ? "(unknown)" : "?");
 
@@ -7808,7 +7808,7 @@ print_task_header(FILE *out, struct task_context *tc, int newline)
 	char buf[BUFSIZE];
 	char buf1[BUFSIZE];
 
-        fprintf(out, "%sPID: %-7ld  TASK: %s  CPU: %-3s  COMMAND: \"%s\"\n",
+        fprintf(out, "%sPID: %-7ld  TASK: %s  CPU/NUMA: %-8s  COMMAND: \"%s\"\n",
 		newline ? "\n" : "", tc->pid, 
 		mkstring(buf1, VADDR_PRLEN, LJUST|LONG_HEX, MKSTR(tc->task)),
 		task_cpu(tc->processor, buf, !VERBOSE), tc->comm);
