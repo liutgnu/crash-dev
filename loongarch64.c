@@ -1893,6 +1893,13 @@ loongarch64_init(int when)
 		machdep->last_ptbl_read = 0;
 		machdep->verify_paddr = generic_verify_paddr;
 		machdep->ptrs_per_pgd = PTRS_PER_PGD;
+
+		/*
+		 * derive_kaslr_offset() handles the CONFIG_RANDOMIZE_BASE=n
+		 * case by setting kt->relocate to 0.
+		 */
+		if (!kt->relocate && !(kt->flags2 & (RELOC_AUTO|KASLR)))
+			kt->flags2 |= (RELOC_AUTO|KASLR);
 		break;
 
 	case PRE_GDB:
