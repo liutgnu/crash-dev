@@ -1876,6 +1876,8 @@ pt_level_alloc(char **lvl, char *name)
 void
 loongarch64_init(int when)
 {
+	char *string;
+
 		switch (when) {
 	case SETUP_ENV:
 		machdep->process_elf_notes = process_elf64_notes;
@@ -1933,8 +1935,20 @@ loongarch64_init(int when)
 		break;
 
 	case POST_GDB:
-		machdep->section_size_bits = _SECTION_SIZE_BITS;
-		machdep->max_physmem_bits = _MAX_PHYSMEM_BITS;
+		string = pc->read_vmcoreinfo("NUMBER(SECTION_SIZE_BITS)");
+		if (string) {
+			machdep->section_size_bits = strtoul(string, NULL, 10);
+			free(string);
+		} else
+			machdep->section_size_bits = _SECTION_SIZE_BITS;
+
+
+		string = pc->read_vmcoreinfo("NUMBER(MAX_PHYSMEM_BITS)");
+		if (string) {
+			machdep->max_physmem_bits = strtoul(string, NULL, 10);
+			free(string);
+		} else
+			machdep->max_physmem_bits = _MAX_PHYSMEM_BITS;
 
 		if (symbol_exists("irq_desc"))
 			ARRAY_LENGTH_INIT(machdep->nr_irqs, irq_desc,

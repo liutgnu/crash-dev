@@ -3905,7 +3905,7 @@ typedef signed int s32;
 
 #define TIF_SIGPENDING		(1)
 
-#define _SECTION_SIZE_BITS	28
+#define _SECTION_SIZE_BITS	29
 #define _MAX_PHYSMEM_BITS	48
 #endif  /* LOONGARCH64 */
 
